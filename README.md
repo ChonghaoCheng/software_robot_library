@@ -35,10 +35,31 @@ Robot Library is a C++ package for modeling, trajectory generation, and control 
 - [Trajectory](Trajectory/README.md): Classes for generating paths through space & time.
 
 The diagram below shows how the different libraries interact:
+```mermaid
+graph LR
 
-<p align="center">
-    <img src = "doc/interaction.png" width="450" height="auto"/>
-</p>
+   subgraph Hardware
+      Robot
+   end
+
+   subgraph RobotLibrary
+
+      subgraph Algorithms
+         Trajectory -- "Reference State" --> Control
+         Control -- "Joint Commands" --> Robot
+         Robot -- "Actual State" --> Model
+         Model -- "Kinematics & Dynamics" --> Control
+      end
+   
+      subgraph Support
+           Math
+      end
+
+      Support -. "Functions" .-> Algorithms
+
+   end
+
+```
 
 [:top: Back to Top.](#robot-robot-library)
 
