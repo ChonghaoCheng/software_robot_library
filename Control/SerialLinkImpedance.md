@@ -219,6 +219,9 @@ The redundant task is defined to keep the joints in the middle of their limits:
   \boldsymbol{\tau}_\varnothing = \tfrac{1}{2} \mathbf{K}_j(\mathbf{q}_{min} + \mathbf{q}_{max}) - \mathbf{D}_j \dot{\mathbf{q}}.
 ```
 
+> [!NOTE]
+> The current implementation uses a fixed redundant task to keep the joints away from their position limits. Future work will enable specifying a desired configuration.
+
 [:top: Back to top.](#serial-link-impedance)
 
 #### Cartesian Velocity Control
