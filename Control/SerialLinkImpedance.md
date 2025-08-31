@@ -122,10 +122,10 @@ This method automatically clamps the desired joint positions to avoid joint limi
 > [!WARNING]
 > The `SerialLinkImpedance` class cannot guarantee joint limit avoidance like the `SerialLinkKinematic` or `SerialLinkDynamic` classes in Cartesian control mode.
 
-The forward kinematics of a serial link chain gives the endpoint position and orientation (pose) $\mathbf{x}\in\mathbb{R}^m$ as a function of its joint configuration $\mathbf{q}\in\mathbb{R}^n$:
+The forward kinematics of a serial link chain gives the endpoint position and orientation (pose) $\mathbf{T}\in\mathbb{SE}(3)$ as a function of its joint configuration $\mathbf{q}\in\mathbb{R}^n$:
 
 ```math
-    \mathbf{T} = \mathbf{k}(\mathbf{q})
+    \mathbf{T} = \mathbf{k}(\mathbf{q}) \in\mathbb{SE}(3)
 ```
 
 which, for theoretical convenience, is mapped to a vector of position and orientation:
@@ -138,7 +138,7 @@ The forward kinematics is computed when you call the `update_state()` method on 
 
 If we take the time derivative of the forward kinematics we obtain:
 ```math
-\dot{\mathbf{x}} = \overbrace{(\partial\mathbf{f}/\partial\mathbf{q})}^{\mathbf{J}(\mathbf{q})}\cdot\dot{\mathbf{q}}
+\dot{\mathbf{x}} = \overbrace{(\partial\mathbf{x}/\partial\mathbf{q})}^{\mathbf{J}(\mathbf{q})}\cdot\dot{\mathbf{q}}
 ```
 
 where $\mathbf{J}(\mathbf{q})\in\mathbb{R}^{6\times n}$ is the Jacobian matrix (partial derivatives of the forward kinematics).
