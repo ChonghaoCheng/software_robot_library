@@ -1,4 +1,4 @@
-# SerialLinkBase
+# Serial Link Base
 
 #### 🧭 Navigation:
 - [Overview](#overview)
