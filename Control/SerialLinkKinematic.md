@@ -15,8 +15,12 @@
 ## Overview
 
 The `SerialLinkKinematic` class provides methods for real-time velocity control in both joint and Cartesian space. There are methods for different types of tasks:
-- A reference joint trajectory $\mathbf{q}_d, \dot{\mathbf{q}}_d \in\mathbb{R}^n$,
-- A reference Cartesian trajectory $\mathbf{T}_d\in\mathbb{SE}(3), \dot{\mathbf{x}}_d\in\mathbb{R}^6$, or
+- A reference joint trajectory defined by:
+   - $\mathbf{q}_d \in\mathbb{R}^n$: desired positions, and
+   - $\dot{\mathbf{q}}_d \in\mathbb{R}^n$: desired velocities,
+- A reference Cartesian trajectory defined by:
+   - $\mathbf{T}_d\in\mathbb{SE}(3)$: a desired endpoint pose, and
+   - $\dot{\mathbf{x}}_d\in\mathbb{R}^6$, a desired endpoint twist, or
 - A twist vector $\dot{\mathbf{x}}_d = [\mathbf{v}_d^T \boldsymbol{\omega}_d^T]^T$ where:
   - $\mathbf{v}_d\in\mathbb{R}^3$ is the linear velocity (m/s), and
   - $\boldsymbol{\omega}_d\in\mathbb{R}^3$ is the angular velocity (rad/s).
@@ -77,7 +81,7 @@ graph TD
   SerialLinkBase -- "Inherits" --> QPSolver
   SerialLinkBase -. "Points To" .-> KinematicTree
   KinematicTree -- "Member" --> EndpointFrame
-  SerialLinkBase -. "Utilizes" .- EndpointFrame
+  SerialLinkBase -. "Utilizes" .-> EndpointFrame
 ```
 
 A minimum implementation would be as follows:
@@ -91,8 +95,7 @@ RobotLibrary::Control::SerialLinkParameters parameters;
 auto controller = std::make_shared<RobotLibrary::Control::SerialLinkKinematic>(model, "endpointName", parameters);
 ```
 
-> [!NOTE]
-> You can set things like the joint feedback gains, Cartesian feedback gains, optimisation settings, etc. using the `SerialLinkParameters` data structure.
+You can set things like the joint feedback gains, Cartesian feedback gains, optimisation settings, etc. using the `SerialLinkParameters` data structure.
 
 [:top: Back to top.](#seriallinkkinematic)
 
@@ -116,6 +119,7 @@ Given a desired trajectory defined by:
 where $\mathbf{K}_j\in\mathbb{R}^{n\times n}$ is a positive-definite matrix for the joint position error feedback gains.
 
 Using the above equation it can be shown that the tracking error $\boldsymbol{\epsilon}$ will decay exponentially over time:
+
 ```math
 \dot{\boldsymbol{\epsilon}} = -\mathbf{K}_j\boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_j t}\boldsymbol{\epsilon}(0).
 ```
@@ -126,24 +130,34 @@ The method automatically clamps the final joint control to adhere to limits on t
 
 ## Cartesian Control Methods
 
-The forward kinematics of a serial link chain gives the endpoint position and orientation (pose) $\mathbf{x}\in\mathbb{R}^m$ as a function of its joint configuration $\mathbf{q}\in\mathbb{R}^n$:
+The forward kinematics of a serial link chain gives the endpoint position and orientation (pose) $\mathbf{T}\in\mathbb{SE}(3)$ as a function of its joint configuration $\mathbf{q}\in\mathbb{R}^n$:
+
 ```math
-    \mathbf{x} = \mathbf{f}(\mathbf{q})
+    \mathbf{T} = \mathbf{k}(\mathbf{q}) \in\mathbb{SE}(3)
+```
+
+For theoretical purposes we typically map this to a vector of position and orientation:
+
+```math
+  \mathbf{x} = \phi(\mathbf{T}) \in \mathbb{R}^6.
 ```
 
 > [!NOTE]
 > The forward kinematics is computed when you call the `update_state()` method on the associated `RobotLibrary::Model::KinematicTree` class.
 
 If we take the time derivative of the forward kinematics we obtain:
+
 ```math
-\dot{\mathbf{x}} = \overbrace{(\partial\mathbf{f}/\partial\mathbf{q})}^{\mathbf{J}(\mathbf{q})}\cdot\dot{\mathbf{q}}
+\dot{\mathbf{x}} = \overbrace{(\partial\mathbf{x}/\partial\mathbf{q})}^{\mathbf{J}(\mathbf{q})}\cdot\dot{\mathbf{q}}
 ```
+
 where $\mathbf{J}(\mathbf{q})\in\mathbb{R}^{m\times n}$ is the Jacobian matrix (partial derivatives of the forward kinematics).
 
 > [!NOTE]
 > You **must** call `update()` on the control class to compute a new Jacobian **after** using `update_state()` on the model.
 
-In 3D space (i.e. $m = 6$) we can express the endpoint velocity as a twist vector:
+We can express the endpoint velocity as a twist vector:
+
 ```math
 \dot{\mathbf{x}} = 
 \begin{bmatrix}
@@ -151,6 +165,7 @@ In 3D space (i.e. $m = 6$) we can express the endpoint velocity as a twist vecto
     \boldsymbol{\omega}
 \end{bmatrix}
 ```
+
 where:
 - $\mathbf{v}\in\mathbb{R}^3$ is the linear velocity (m/s), and
 - $\boldsymbol{\omega}\in\mathbb{R}^3$ is the angular velocity (rad/s).
@@ -167,7 +182,11 @@ When calling the `track_endpoint_trajectory()` method, the endoint velocity is c
     \dot{\mathbf{x}} = \dot{\mathbf{x}}_d + \mathbf{K}_c\overbrace{\left(\mathbf{x}_d - \mathbf{f}(\mathbf{q})\right)}^{\boldsymbol{\epsilon}}
 ```
 
-where $\mathbf{K}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error. It can be shown that the aforementioned equation will cause the pose error $\boldsymbol{\epsilon}$ to decay exponentially over time.
+where $\mathbf{K}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error. It can be shown that the aforementioned equation will cause the pose error $\boldsymbol{\epsilon}$ to decay exponentially over time:
+
+```math
+  \dot{\boldsymbol{\epsilon}}= -\mathbf{K}_c \boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_c t}\boldsymbol{\epsilon}(0).
+```
 
 The orientation error is computed using quaternion feedback[^1].
 
@@ -185,6 +204,7 @@ For a non redundant robot $n \le 6$, the joint velocities are optimised using [q
 \dot{\mu}(\mathbf{q},\dot{\mathbf{q}}) \ge -\gamma\cdot\left(\mu(\mathbf{q}) - \mu_{min}\right)
 \end{align}
 ```
+
 where:
 - $\dot{\mathbf{q}}_{min}$ is the lower bound on the joint speed to avoid limits,
 - $\dot{\mathbf{q}}_{max}$ is the upper bound,
@@ -200,6 +220,7 @@ The first set of constraints is for joint limit avoidance [^3], and the second s
 ### Redundant Robots
 
 If the robot is redundant $n > 6$ then the following [quadratic programming (QP) problem](https://github.com/Woolfrey/software_simple_qp) is solved:
+
 ```math
 \begin{align}
 \min_{\dot{\mathbf{q}}} \tfrac{1}{2}\left(\dot{\mathbf{q}}_\varnothing - \dot{\mathbf{q}}\right)^T \mathbf{M}\left(\dot{\mathbf{q}}_\varnothing - \dot{\mathbf{q}}\right) \\
@@ -208,6 +229,7 @@ If the robot is redundant $n > 6$ then the following [quadratic programming (QP)
 \dot{\mu}(\mathbf{q},\dot{\mathbf{q}}) \ge -\gamma\cdot\left(\mu(\mathbf{q}) - \mu_{min}\right)
 \end{align}
 ```
+
 where:
 - $\mathbf{M}\in\mathbb{R}^{n\times n}$ is the joint inertia matrix, and
 - $\dot{\mathbf{q}}_\varnothing\in\mathbb{R}^n$ are the joint velocities for acheiving a secondary task with kinematic redundancy.
@@ -215,13 +237,14 @@ where:
 > [!NOTE]
 > The inertia matrix is assumed to be positive-definite, so you should ensure you have at least a _decent_ dynamic model of the robot.
 
-> [!NOTE]
-> You can use the `set_redundant_task()` method to specifiy your own, but it will be automatically reset after calling any of the Cartesian control methods to ensure validity in the next control step.
+You can use the `set_redundant_task()` method to specifiy your own, but it will be automatically reset after calling any of the Cartesian control methods to ensure validity in the next control step.
 
 If a redundant task is not manually set, the robot will autonomously reconfigure itself away from singular configurations using:
+
 ```math
 \dot{\mathbf{q}}_\varnothing = \tfrac{1}{10\cdot \sqrt{f}} \frac{\partial \mu}{\partial\mathbf{q}}
 ```
+
 where $f\in\mathbb{R}^+$ is the control frequency, and $\partial\mu/\partial\mathbf{q}\in\mathbb{R}^n$ is the gradient of manipulability[^2].
 
 [:top: Back to top.](#seriallinkkinematic)
@@ -229,6 +252,7 @@ where $f\in\mathbb{R}^+$ is the control frequency, and $\partial\mu/\partial\mat
 ### Singularities
 
 If the control barrier function fails to prevent the robot entering a (near) singular configuration, the controller reverts to using dampled least squares (DLS) [^4]:
+
 ```math
 \begin{align}
 \min_{\dot{\mathbf{q}}} \tfrac{1}{2}\left(\dot{\mathbf{x}} - \mathbf{J}\dot{\mathbf{q}}\right)^T \mathbf{M}\left(\dot{\mathbf{x}} - \mathbf{J}\dot{\mathbf{q}}\right) + \tfrac{1}{2}\lambda^2 \dot{\mathbf{q}}^T\dot{\mathbf{q}} \\
@@ -236,7 +260,9 @@ If the control barrier function fails to prevent the robot entering a (near) sin
 \dot{\mathbf{q}}_{min} \le \dot{\mathbf{q}} \le \dot{\mathbf{q}}_{max}
 \end{align}
 ```
-where $\lambda\in\mathbb{R}^+$ is analgous to a damping factor that paralyses high joint velocities near singular configurations:
+
+where $\lambda\in\mathbb{R}^+$ is analogous to a damping factor that paralyses high joint velocities near singular configurations:
+
 ```math
     \lambda^2 = \left(1 - \frac{\mu}{\mu_{min}}\right)^2\lambda_{max}^2.
 ```
