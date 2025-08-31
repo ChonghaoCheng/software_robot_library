@@ -1,5 +1,5 @@
 
-# SerialLinkKinematic
+# Serial Link Kinematic
 
 #### 🧭 Navigation
 - [Overview](#overview)
@@ -50,7 +50,7 @@ flowchart LR
     E --> F
 ```
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 ## Implementation
 
@@ -97,7 +97,7 @@ auto controller = std::make_shared<RobotLibrary::Control::SerialLinkKinematic>(m
 
 You can set things like the joint feedback gains, Cartesian feedback gains, optimisation settings, etc. using the `SerialLinkParameters` data structure.
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 ## Joint Control Methods
 
@@ -126,7 +126,7 @@ Using the above equation it can be shown that the tracking error $\boldsymbol{\e
 
 The method automatically clamps the final joint control to adhere to limits on the joint position, velocity, and acceleration.
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 ## Cartesian Control Methods
 
@@ -172,7 +172,7 @@ where:
 
 You can specify an endpoint velocity directly with the `resolve_endpoint_twist()` command.
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 #### Cartesian Trajectory Tracking
 
@@ -247,7 +247,7 @@ If a redundant task is not manually set, the robot will autonomously reconfigure
 
 where $f\in\mathbb{R}^+$ is the control frequency, and $\partial\mu/\partial\mathbf{q}\in\mathbb{R}^n$ is the gradient of manipulability[^2].
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 ### Singularities
 
@@ -271,6 +271,6 @@ This will sacrifice task accuracy in order to keep the joint velocities stable.
 
 [^4]: Chiaverini, S., Egeland, O., & Kanestrom, R. K. (1991, June). Achieving user-defined accuracy with damped least-squares inverse kinematics. In Fifth International Conference on Advanced Robotics' Robots in Unstructured Environments (pp. 672-677). IEEE.
 
-[:top: Back to top.](#seriallinkkinematic)
+[:top: Back to top.](#serial-link-kinematic)
 
 ## References:
