@@ -61,7 +61,7 @@ graph LR
   end
 ```
 
-[🔝 Back to top.](#seriallinkbase)
+[🔝 Back to top.](#serial-link-base)
 
 ## Implementation
 
@@ -101,4 +101,4 @@ switch (controlMode)
 }
 ```
 
-[🔝 Back to top.](#seriallinkbase)
+[🔝 Back to top.](#serial-link-base)
