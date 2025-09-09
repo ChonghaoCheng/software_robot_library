@@ -1,5 +1,9 @@
 # Serial Link Base
 
+[🔙 Back to Control](../README.md)
+
+[🔙 Back to the Foyer](../../README.md)
+
 #### 🧭 Navigation:
 - [Overview](#overview)
 - [Implementation](#implementation)
