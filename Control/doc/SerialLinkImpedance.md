@@ -1,5 +1,7 @@
-
 # Serial Link Impedance
+[🔙 Back to Control](../README.md)
+
+[🔙 Back to the Foyer](../../README.md)
 
 #### 🧭 Navigation
 - [Overview](#overview)
@@ -23,6 +25,9 @@ The `SerialLinkImpedance` class provides methods for joint and Cartesian space i
 - A twist vector $\dot{\mathbf{x}}_d = [\mathbf{v}_d^T \boldsymbol{\omega}_d^T]^T$ where:
   - $\mathbf{v}_d\in\mathbb{R}^3$ is the linear velocity (m/s), and
   - $\boldsymbol{\omega}_d\in\mathbb{R}^3$ is the angular velocity (rad/s).
+
+> [!TIP]
+> You can generate joint and Cartesian trajectories using classes in the [Trajectory](../../Trajectory/README.md) sublibrary.
 
 In each case, the controller computes the the joint torques required to execute the task.
 
@@ -87,7 +92,8 @@ RobotLibrary::Control::SerialLinkParameters parameters;
 auto controller = std::make_shared<RobotLibrary::Control::SerialLinkKinematic>(model, "endpointName", parameters);
 ```
 
-You can set things like the joint feedback gains, Cartesian feedback gains, optimisation settings, etc. using the `SerialLinkParameters` data structure.
+> [!NOTE]
+> You can set things like the joint feedback gains, Cartesian feedback gains, optimisation settings, etc. using the `SerialLinkParameters` data structure.
 
 [:top: Back to top.](#serial-link-impedance)
 
@@ -105,13 +111,13 @@ Given a desired trajectory defined by:
 the torque $\boldsymbol{\tau}\in\mathbb{R}^n$ to control the joints is computed as:
 
 ```math
-\boldsymbol{\tau} = \mathbf{D}_j (\dot{\mathbf{q}}_d - \dot{\mathbf{q}}) + \mathbf{K}_j (\mathbf{q}_d - \mathbf{q})
+\boldsymbol{\tau} = \mathbf{D}_q (\dot{\mathbf{q}}_d - \dot{\mathbf{q}}) + \mathbf{K}_q (\mathbf{q}_d - \mathbf{q})
 ```
 
 where:
 
-- $\mathbf{D}_j\in\mathbb{R}^{n\times n}$ is a positive-definite gain matrix on the velocity error, and
-- $\mathbf{K}_j\in\mathbb{R}^{n\times n}$ is a positive-definite gain matrix on the position error.
+- $\mathbf{D}_q\in\mathbb{R}^{n\times n}$ is a positive-definite gain matrix on the velocity error, and
+- $\mathbf{K}_q\in\mathbb{R}^{n\times n}$ is a positive-definite gain matrix on the position error.
 
 This method automatically clamps the desired joint positions to avoid joint limits.
 
@@ -216,7 +222,7 @@ meaning it is idempotent.
 The redundant task is defined to keep the joints in the middle of their limits:
 
 ```math
-  \boldsymbol{\tau}_\varnothing = \tfrac{1}{2} \mathbf{K}_j(\mathbf{q}_{min} + \mathbf{q}_{max}) - \mathbf{D}_j \dot{\mathbf{q}}.
+  \boldsymbol{\tau}_\varnothing = \tfrac{1}{2} \mathbf{K}_q(\mathbf{q}_{min} + \mathbf{q}_{max}) - \mathbf{D}_q \dot{\mathbf{q}}.
 ```
 
 > [!NOTE]
@@ -229,26 +235,26 @@ The redundant task is defined to keep the joints in the middle of their limits:
 Given a desired endpoint twist $\dot{\mathbf{x}}_d\in\mathbb{R}^6$, the endpoint wrench is computed as:
 
 ```math
-  \mathbf{w} = \mathbf{D}_c (\dot{\mathbf{x}}_d - \mathbf{J}\dot{\mathbf{q}})
+  \mathbf{w} = \mathbf{D}_x (\dot{\mathbf{x}}_d - \mathbf{J}\dot{\mathbf{q}})
 ```
 
-where $\mathbf{D}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the twist error.
+where $\mathbf{D}_x\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the twist error.
 
 #### Cartesian Trajectory Tracking
 
 When calling the `track_endpoint_trajectory()` method, the endoint wrench is computed as:
 
 ```math
-    \mathbf{w} = \mathbf{D}_c (\dot{\mathbf{x}}_d - \mathbf{J}\dot{\mathbf{q}}) + \mathbf{K}_c (\mathbf{x}_d - \mathbf{k}(\mathbf{q}))
+    \mathbf{w} = \mathbf{D}_x (\dot{\mathbf{x}}_d - \mathbf{J}\dot{\mathbf{q}}) + \mathbf{K}_x (\mathbf{x}_d - \mathbf{k}(\mathbf{q}))
 ```
 
 where:
-- $\mathbf{D}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the twist error, and
-- $\mathbf{K}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error.
+- $\mathbf{D}_x\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the twist error, and
+- $\mathbf{K}_x\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error.
 
 The orientation error is computed using quaternion feedback[^1].
 
-[^1]: Yuan, J. S. (1988). _Closed-loop manipulator control using quaternion feedback._ IEEE Journal on Robotics and Automation, 4(4), 434-440.
+[^1]: Yuan, J. S. (1988). _xlosed-loop manipulator control using quaternion feedback._ IEEE Journal on Robotics and Automation, 4(4), 434-440.
 
 
 [:top: Back to top.](#serial-link-impedance)
