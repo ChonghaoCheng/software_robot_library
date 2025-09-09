@@ -1,5 +1,8 @@
-
 # Serial Link Kinematic
+
+[🔙 Back to Control](../README.md)
+
+[🔙 Back to the Foyer](../../README.md)
 
 #### 🧭 Navigation
 - [Overview](#overview)
@@ -24,6 +27,9 @@ The `SerialLinkKinematic` class provides methods for real-time velocity control 
 - A twist vector $\dot{\mathbf{x}}_d = [\mathbf{v}_d^T \boldsymbol{\omega}_d^T]^T$ where:
   - $\mathbf{v}_d\in\mathbb{R}^3$ is the linear velocity (m/s), and
   - $\boldsymbol{\omega}_d\in\mathbb{R}^3$ is the angular velocity (rad/s).
+ 
+> [!TIP]
+> You can generate joint and Cartesian trajectories using the classes in the [Trajectory](../../Trajectory/README.md) sublibrary.
 
 In each case, the controller computes the the joint velocities required to execute the task, subject to joint limits (position, velocity, and acceleration):
 
@@ -113,15 +119,15 @@ Given a desired trajectory defined by:
  the velocity to control the joint is computed as:
 
 ```math
-\dot{\mathbf{q}} = \dot{\mathbf{q}}_d + \mathbf{K}_j \underbrace{\left(\mathbf{q}_d - \mathbf{q}\right)}_{\boldsymbol{\epsilon}}
+\dot{\mathbf{q}} = \dot{\mathbf{q}}_d + \mathbf{K}_q \underbrace{\left(\mathbf{q}_d - \mathbf{q}\right)}_{\boldsymbol{\epsilon}}
 
 ```
-where $\mathbf{K}_j\in\mathbb{R}^{n\times n}$ is a positive-definite matrix for the joint position error feedback gains.
+where $\mathbf{K}_q\in\mathbb{R}^{n\times n}$ is a positive-definite matrix for the joint position error feedback gains.
 
 Using the above equation it can be shown that the tracking error $\boldsymbol{\epsilon}$ will decay exponentially over time:
 
 ```math
-\dot{\boldsymbol{\epsilon}} = -\mathbf{K}_j\boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_j t}\boldsymbol{\epsilon}(0).
+\dot{\boldsymbol{\epsilon}} = -\mathbf{K}_q\boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_q t}\boldsymbol{\epsilon}(0).
 ```
 
 The method automatically clamps the final joint control to adhere to limits on the joint position, velocity, and acceleration.
@@ -141,9 +147,6 @@ For theoretical purposes we typically map this to a vector of position and orien
 ```math
   \mathbf{x} = \phi(\mathbf{T}) \in \mathbb{R}^6.
 ```
-
-> [!NOTE]
-> The forward kinematics is computed when you call the `update_state()` method on the associated `RobotLibrary::Model::KinematicTree` class.
 
 If we take the time derivative of the forward kinematics we obtain:
 
@@ -179,18 +182,18 @@ You can specify an endpoint velocity directly with the `resolve_endpoint_twist()
 When calling the `track_endpoint_trajectory()` method, the endoint velocity is computed as:
 
 ```math
-    \dot{\mathbf{x}} = \dot{\mathbf{x}}_d + \mathbf{K}_c\overbrace{\left(\mathbf{x}_d - \mathbf{f}(\mathbf{q})\right)}^{\boldsymbol{\epsilon}}
+    \dot{\mathbf{x}} = \dot{\mathbf{x}}_d + \mathbf{K}_x\overbrace{\left(\mathbf{x}_d - \mathbf{f}(\mathbf{q})\right)}^{\boldsymbol{\epsilon}}
 ```
 
-where $\mathbf{K}_c\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error. It can be shown that the aforementioned equation will cause the pose error $\boldsymbol{\epsilon}$ to decay exponentially over time:
+where $\mathbf{K}_x\in\mathbb{R}^{6\times 6}$ is a positive definite gain matrix on the pose error. It can be shown that the aforementioned equation will cause the pose error $\boldsymbol{\epsilon}$ to decay exponentially over time:
 
 ```math
-  \dot{\boldsymbol{\epsilon}}= -\mathbf{K}_c \boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_c t}\boldsymbol{\epsilon}(0).
+  \dot{\boldsymbol{\epsilon}}= -\mathbf{K}_x \boldsymbol{\epsilon} ~\Longrightarrow~ \boldsymbol{\epsilon}(t) = e^{-\mathbf{K}_x t}\boldsymbol{\epsilon}(0).
 ```
 
 The orientation error is computed using quaternion feedback[^1].
 
-[^1]: Yuan, J. S. (1988). _Closed-loop manipulator control using quaternion feedback._ IEEE Journal on Robotics and Automation, 4(4), 434-440.
+[^1]: Yuan, J. S. (1988). _xlosed-loop manipulator control using quaternion feedback._ IEEE Journal on Robotics and Automation, 4(4), 434-440.
 
 ### Non-Redundant Robots
 
