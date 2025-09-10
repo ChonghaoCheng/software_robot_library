@@ -1,7 +1,6 @@
 
 # List the source files for this library
 add_library(Control src/SerialLinkBase.cpp
-                    src/SerialLinkDynamic.cpp
                     src/SerialLinkImpedance.cpp
                     src/SerialLinkKinematic.cpp
 )
