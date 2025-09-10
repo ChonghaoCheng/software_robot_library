@@ -325,10 +325,14 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
                             const RobotLibrary::Model::Pose &basePose,
                             const Eigen::Vector<double,6> &baseTwist)
 {
+    // For brevity:
     using namespace Eigen;
     using namespace RobotLibrary::Model;
     using namespace RobotLibrary::Math;
     
+    std::unique_lock lock(_mutex);                                                                  // Block the state from being read while we're updating
+    
+    // Check input arguments are sound
     if (jointPosition.size() != _numberOfJoints
     or  jointVelocity.size() != _numberOfJoints)
     {
@@ -338,6 +342,7 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
                                     "the joint velocity argument had " + std::to_string(jointVelocity.size()) + " elements.");
     }
     
+    // Update state
     _jointPosition = jointPosition;    
     _jointVelocity = jointVelocity;    
     this->base.update_state(basePose, baseTwist);
@@ -382,6 +387,7 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
                                                         + Jw.transpose() * (currentLink->inertia_derivative() * Jw + currentLink->inertia() * Jdot.block(3,0,3,k+1));
         
         _jointGravityVector.head(k+1) -= mass * Jv.transpose() * _gravityVector;
+        
         _jointDampingVector[k] = currentLink->joint().damping() * _jointVelocity[k];
         
         
@@ -393,6 +399,7 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
                                                    - mass * (SkewSymmetric(currentLink->twist().head(3)) * Jv).transpose();
         
         std::vector<Link*> temp = currentLink->child_links();
+        
         if(not temp.empty()) candidateList.insert(candidateList.begin(), temp.begin(), temp.end());
     }
     
@@ -632,9 +639,22 @@ KinematicTree::jacobian(const std::string &frameName)
 RobotLibrary::Model::Pose
 KinematicTree::frame_pose(const std::string &frameName)
 {
+    std::shared_lock lock(_mutex);
+    
      RobotLibrary::Model::ReferenceFrame *frame = find_frame(frameName);                            // Search the model
      
      return frame->link->pose()*frame->relativePose;                                                // Return pose relative to base/global frame
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                         Get the pose of a reference frame on the robot                         //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Model::Pose
+KinematicTree::frame_pose(RobotLibrary::Model::ReferenceFrame *frame) const
+{
+    std::shared_lock lock(_mutex);                                                                  // This allows multiple readers
+    
+    return frame->link->pose() * frame->relativePose;
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
