@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    July 2025
- * @version 2.1
+ * @version 2.1.1
  * @brief   A class for a multi rigid body system of branching serial link structures.
  * 
  * @details This class is used to compute the kinematics and dynamics of branching, serial link structures.

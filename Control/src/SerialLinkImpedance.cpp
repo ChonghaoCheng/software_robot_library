@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    August 2025
- * @version 1.0
+ * @version 1.0.1
  *
  * @brief   Implements control laws for joint and Cartesian impedance control.
  * 
