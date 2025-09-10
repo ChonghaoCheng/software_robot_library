@@ -1,9 +1,10 @@
 /**
- * @file    SerialKinematicControl.h
+ * @file    SerialLinkBase.cpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
- * @date    July 2025
- * @version 1.1
+ * @date    August 2025
+ * @version 2.0.1
+ *
  * @brief   A base class providing a standardised interface for all serial link robot arm controllers.
  * 
  * @details This class is designed to provide a standardised structure for all types of serial link
@@ -29,7 +30,7 @@ namespace RobotLibrary { namespace Control {
 SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
                                const std::string &endpointName,
                                const RobotLibrary::Control::SerialLinkParameters &parameters)
-                              : QPSolver<double>(parameters.qpsolver)
+: QPSolver<double>(parameters.qpsolver)
 {
      _model = model;                                                                                // Save model internally so we can access it later
 
@@ -43,11 +44,35 @@ SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTre
      _cartesianPoseGain     = parameters.cartesianPoseGain;
      _cartesianVelocityGain = parameters.cartesianVelocityGain;
      _controlFrequency      = parameters.controlFrequency;
-     _jointPositionGain     = parameters.jointPositionGain;
-     _jointVelocityGain     = parameters.jointVelocityGain;
      _minManipulability     = parameters.minManipulability;
      _maxJointAcceleration  = parameters.maxJointAcceleration;  
      
+    // No gains set; use default
+    if (parameters.jointPositionGains.size() == 0
+    and parameters.jointVelocityGains.size() == 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            _jointPositionGains.push_back(100.0);
+            _jointVelocityGains.push_back( 20.0);
+        }
+    }
+    // Incorrect size  
+    else if (parameters.jointPositionGains.size() != n
+         or  parameters.jointVelocityGains.size() != n)
+    {
+        throw std::invalid_argument("[ERROR] [SERIAL LINK BASE] Constructor: "
+                                    "Joint position gain, and joint velocity gain vectors had "
+                                    + std::to_string(parameters.jointPositionGains.size()) + " and "
+                                    + std::to_string(parameters.jointVelocityGains.size()) + " elements respectively, but expected "
+                                    + std::to_string(n) + ".");
+    }
+    else
+    {
+        _jointPositionGains  = parameters.jointPositionGains;
+        _jointVelocityGains  = parameters.jointVelocityGains;
+    }
+   
      // Set up the QP solver
      
      // Resize dimensions of inequality constraints for the QP solver: B*qdot < z, where:
@@ -55,8 +80,7 @@ SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTre
      // B = [      I    ]   z = [    qdot_max  ]
      //     [     -I    ]       [   -qdot_min  ]
      //     [  (dm/dq)' ]       [  (m - m_min) ]
-     
-     
+       
      _constraintMatrix.resize(2*n+1,n);
      _constraintMatrix.block(0,0,n,n).setIdentity();
      _constraintMatrix.block(n,0,n,n) = -_constraintMatrix.block(0,0,n,n);
@@ -73,7 +97,9 @@ SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTre
 void
 SerialLinkBase::update()
 {
-	_endpointPose = _endpointFrame->link->pose() * _endpointFrame->relativePose;                    // Compute new endpoint pose
+//	_endpointPose = _endpointFrame->link->pose() * _endpointFrame->relativePose;                    // Compute new endpoint pose
+
+    _endpointPose = _model->frame_pose(_endpointFrame);                                             // Call thread-safe method
 	                      
     _jacobianMatrix = _model->jacobian(_endpointFrame);                                             // Jacobian for the endpoint
 	                      
@@ -92,11 +118,11 @@ SerialLinkBase::set_redundant_task(const Eigen::VectorXd &task)
 {
      if (task.size() != _model->number_of_joints())
      {
-          std::cerr << "[ERROR] [SERIAL LINK] set_redundant_task(): "
-                    << "This robot model has " << _model->number_of_joints() << " joints, "
-                    << "but you assigned a task with " << task.size() << " elements.\n";
-          
-          return false;
+        std::cerr << "[ERROR] [SERIAL LINK] set_redundant_task(): "
+                  << "This robot model has " << _model->number_of_joints() << " joints, "
+                  << "but you assigned a task with " << task.size() << " elements.\n";
+
+        return false;
      }
      else
      {
@@ -113,9 +139,9 @@ SerialLinkBase::set_redundant_task(const Eigen::VectorXd &task)
 Eigen::Vector<double,6>
 SerialLinkBase::pose_error(const RobotLibrary::Model::Pose &desired)
 {
-    Eigen::Vector<double,6> error = _endpointPose.error(desired);
+    Eigen::Vector<double,6> error = _endpointPose.error(desired);                                   // Get position & orientation error
 
-    _positionError = error.head(3).norm();
+    _positionError = error.head(3).norm();                                                          // Save internally for future use
 
     Eigen::Quaterniond orientationError = desired.quaternion() * _endpointPose.quaternion().inverse();
 

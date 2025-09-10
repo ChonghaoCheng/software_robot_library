@@ -1,6 +1,6 @@
-# :robot: Robot Library :open_book:
+# :robot: Robot Library
 
-Robot Library is a C++ package for modeling, trajectory generation, and control of robots. The [initial release](#package-release-notes---v100-april-2025) supports real-time velocity control of serial link robot arms (work on torque control is underway!). Checkout the [ROS2 action server](https://github.com/Woolfrey/server_serial_link) to see it in action :boom:
+Robot Library is a C++ package for modeling, trajectory generation, and control of robots. The current release supports velocity, and (inertia-free) impedance control of serial link robot arms.
 
 #### :sparkles: Features:
 - _Everything_ is contained in _one_ library: modeling, control, _and_ trajectory generation.
@@ -21,7 +21,6 @@ Robot Library is a C++ package for modeling, trajectory generation, and control 
 - [Using Robot Library](#rocket-using-robot-library)
     - [In Another Project](#in-another-project)
     - [Examples](#examples)
-- [Release Notes](#package-release-notes---v100-april-2025)
 - [Contributing](#handshake-contributing)
 - [Citing this Repository](#bookmark_tabs-citing-this-repository)
 - [License](#scroll-license)
@@ -34,12 +33,33 @@ Robot Library is a C++ package for modeling, trajectory generation, and control 
 - [Trajectory](Trajectory/README.md): Classes for generating paths through space & time.
 
 The diagram below shows how the different libraries interact:
+```mermaid
+graph LR
 
-<p align="center">
-    <img src = "doc/interaction.png" width="450" height="auto"/>
-</p>
+   subgraph Hardware
+      Robot
+   end
 
-[:top: Back to Top.](#robot-robot-library-open_book)
+   subgraph RobotLibrary
+
+      subgraph Algorithms
+         Trajectory -- "Reference State" --> Control
+         Control -- "Joint Commands" --> Robot
+         Robot -- "Actual State" --> Model
+         Model -- "Kinematics & Dynamics" --> Control
+      end
+   
+      subgraph Support
+           Math
+      end
+
+      Support -. "Functions" .-> Algorithms
+
+   end
+
+```
+
+[:top: Back to Top.](#robot-robot-library)
 
 ## :floppy_disk: Installation
 
@@ -57,58 +77,73 @@ The diagram below shows how the different libraries interact:
 #### Ubuntu 20.04
 
 1. First ensure prerequisites are installed:
+   ```
+   sudo apt update
+   ```
+   ```
+   sudo apt install -y build-essential cmake git
+   ```
+    
+3. Download version 3.4 directly (or from the webpage):
+   ```
+   wget https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+   ```
 
-    `sudo apt update`
+5. Extract the downloaded file:
+   ```
+   tar -xvf eigen-3.4.0.tar.gz
+   ```
+   ```
+   cd eigen-3.4.0
+   ```
     
-    `sudo apt install -y build-essential cmake git`
-    
-2. Download version 3.4 directly (or from the webpage):
-
-    `wget https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz`
-
-3. Extract the downloaded file:
-
-    `tar -xvf eigen-3.4.0.tar.gz`
-    
-    `cd eigen-3.4.0`
-    
-4. Build and install:
-
-    `mkdir build && cd build`
-    
-    `cmake ../`
-    
-    `sudo make install`
+7. Build and install:
+   ```
+   mkdir build && cd build
+   ```
+   ```
+   cmake ../
+   ```
+   ```
+   sudo make install
+   ```
 
 #### Ubuntu 22.04 & Later
 
 Eigen 3.4 is automatically installed on later versions of Ubuntu. In the command line you can run:
 
-  `sudo apt install libeigen3-dev`
+```
+sudo apt install libeigen3-dev
+```
 
 ### Installing RobotLibrary:
 
 1. Clone this repository in to your working directory:
-
-   `git clone https://github.com/Woolfrey/software_robot_library.git`
+   ```
+   git clone https://github.com/Woolfrey/software_robot_library.git
+   ```
    
-2. Navigate in to the folder:
+3. Navigate in to the folder:
+   ```
+   cd ~/<your_working_directory>/software_robot_library
+   ```
 
-   `cd ~/<your_working_directory>/software_robot_library`
+5. Create a build directory and navigate in to it:
+   ```
+   mkdir build && cd build
+   ```
 
-3. Create a build directory and navigate in to it:
-
-   `mkdir build && cd build`
-
-4. Run the following commands in the `build` directory:
-
-   `cmake ..`
-   
-   `sudo make install`
+7. Run the following commands in the `build` directory:
+   ```
+   cmake ..
+   ```
+   ```
+   sudo make install
+   ```
 
 You should now be able to include different parts of the library in your C++ files.
 
-[:top: Back to Top.](#robot-robot-library-open_book)
+[:top: Back to Top.](#robot-robot-library)
 
 ## :rocket: Using Robot Library
 
@@ -164,35 +199,10 @@ make
 If you would like to see examples where `RobotLibrary` has been applied, you can check out:
 
 - [Serial Link Action Server](https://github.com/Woolfrey/server_serial_link) : My own ROS2 action servers for control,
-- [Kuka iiwa14 velocity control](https://github.com/Woolfrey/control_kuka_velocity) : a ROS2 package which implements the former action server, and
-- [TestingRobotLibrary](https://github.com/Woolfrey/testing_robot_library) : C++ executables I use for numerical validation of RobotLibrary.
+- [Serial Link Velocity Control](https://github.com/Woolfrey/control_serial_link_velocity) : A ROS2 package for controlling the joint or Cartesian velocity of serial link robots, or
+- [Serial Link Impedance Control](https://github.com/Woolfrey/control_serial_link_impedance) : A ROS2 package for controlling the joint or Cartesian impedance of serial link robots.
 
-[:top: Back to Top.](#robot-robot-library-open_book)
-
-## :package: Release Notes - v1.0.0 (April 2025)
-
-### :tada: Initial Release:
-- Control:
-     - SerialLinkBase : Base class providing common structure for all child classes.
-     - SerialKinematicControl : Joint velocity & Cartesian velocity control algorithms.
-- Math:
-     - MathFunctions : Helper functions for other classes.
-     - Polynomial : Generates a scalar, polynomial function.
-     - SkewSymmetric: Converted an `Eigen::Vector3d` object to an anti-symmetric `Eigen::Matrix3d` object.
-     - Spline : Connects multiple points using polynomials, whilst ensuring continuity.
-- Model:
-     - Joint : Models an actuated joint on a robot.
-     - KinematicTree : Kinematic & dynamic modeling of branching, serial-link structures.
-     - Link : Represents a combined `Joint` and `RigidBody` object.
-     - Pose : Position and orientation; $\mathbb{SE}(3)$.
-     - RigidBody : Dynamics for a single, solid object.
-- Trajectory:
-     - CartesianSpline : Generates smooth trajectories over a series of poses.
-     - SplineTrajectory : Generates smooth trajectories over a series of points.
-     - TrajectoryBase : Provides common structure to all trajectory classes.
-     - TrapezoidalVelocity : Trajectory with constant sections, and ramps up and down.
-  
-[:top: Back to Top.](#robot-robot-library-open_book)
+[:top: Back to Top.](#robot-robot-library)
     
 ## :handshake: Contributing
 
@@ -203,7 +213,7 @@ Contributions to this repositore are welcome! Feel free to:
 
 If you're looking for ideas, you can always check the [Issues tab](https://github.com/Woolfrey/software_robot_library/issues) for those with :raising_hand: [OPEN]. These are things I'd like to implement, but don't have time for. It'd be much appreciated, and you'll be tagged as a contributor :sunglasses:
 
-[:top: Back to Top.](#robot-robot-library-open_book)
+[:top: Back to Top.](#robot-robot-library)
 
 ## :bookmark_tabs: Citing this Repository
 
@@ -211,29 +221,31 @@ If you find this code useful, spread the word by acknowledging it. Click on `Cit
 
 Here's a BibTeX reference:
 ```
-@software{woolfrey_robot_library_2025
-     author  = {Woolfrey, Jon},
-     month   = apr,
-     title   = {{R}obot {L}ibrary},
-     url     = {https://github.com/Woolfrey/software_robot_library},
-     version = {1.0.0},
-     year    = {2025}
+@misc{woolfrey_robotlibrary_2025,
+  author       = {Woolfrey, Jon},
+  title        = {RobotLibrary},
+  howpublished = {\url{https://github.com/Woolfrey/software_robot_library}},
+  note         = {Version 2.0.0},
+  year         = {2025},
+  month        = {aug},
+  day          = {11},
+  orcid        = {0000-0001-5926-5669}
 }
 ```
 Here's the automatically generated APA format:
 ```
-Woolfrey, J. (2025). Robot Library (Version 1.0.0). Retrieved from https://github.com/Woolfrey/software_robot_library
+Woolfrey, J. (2025). Robot Library (Version 2.0.0). Retrieved from https://github.com/Woolfrey/software_robot_library
 ```
 
-[:top: Back to Top.](#robot-robot-library-open_book)
+[:top: Back to Top.](#robot-robot-library)
 
 ## :scroll: License
 
 This project is licensed under an **Open Source / Commercial Use License (OSCL)**. You are free to use, modify, and (re)distribute this software at no cost under the following conditions:
 
-- You may incorporate this software into your own project, as long as your project also remains free and open source, in accordance with an [OSI-approved open-source license](https://opensource.org/licenses).
+- You may incorporate this software into your own project, as long as your project also remains free and open source.
 - You may use this software in a closed-source, proprietary, or commercial product or service, _but_ you must obtain a commercial license. Please contact [jonathan.woolfrey@gmail.com](mailto:jonathan.woolfrey@gmail.com) to discuss licensing terms and royalties.
 
 This license is designed to encourage open collaboration — but if you profit, then so must I (if only a little :pinching_hand:). See the full [LICENSE](./LICENSE) for complete terms.
 
-[:top: Back to Top.](#robot-robot-library-open_book)
+[:top: Back to Top.](#robot-robot-library)

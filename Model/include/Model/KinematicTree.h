@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    July 2025
- * @version 2.1
+ * @version 2.1.1
  * @brief   A class for a multi rigid body system of branching serial link structures.
  * 
  * @details This class is used to compute the kinematics and dynamics of branching, serial link structures.
@@ -29,6 +29,8 @@
 
 #include <fstream>                                                                                  // For loading files
 #include <map>                                                                                      // std::map
+#include <mutex>
+#include <shared_mutex>                                                                             // std::shared_mutex
 #include <tinyxml2.h>                                                                               // For parsing urdf files
 
 namespace RobotLibrary { namespace Model {
@@ -146,10 +148,20 @@ class KinematicTree
 
           /**
            * @brief Get the pose of a specified reference frame on the kinematic tree.
-           * @return Returns a RobotLibrary::RobotLibrary::Model::Pose object.
+           * @param frameName The name of the frame in the model.
+           * @return Returns a RobotLibrary::Model::Pose object.
            */
           RobotLibrary::Model::Pose
           frame_pose(const std::string &frameName);
+          
+          /**
+           * @brief Get the pose specified by the memory address of the reference frame.
+           * @note This method is thread safe.
+           * @param frame A pointer to a known frame.
+           * @return A RobotLibrary::Model::Pose object.
+           */
+          RobotLibrary::Model::Pose
+          frame_pose(RobotLibrary::Model::ReferenceFrame *frame) const;
           
           /**
            * @brief Get the joint torques from viscous friction.
@@ -258,6 +270,8 @@ class KinematicTree
           std::string _name;                                                                        ///< A unique name for this model.
           
           std::string _baseName;                                                                    ///< Name of the base link
+
+          mutable std::shared_mutex _mutex;                                                         ///< Blocks reading of pointers during update_state()        
           
           unsigned int _numberOfJoints;                                                             ///< The number of actuated joint in the kinematic tree.
                   
