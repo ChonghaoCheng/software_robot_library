@@ -1,5 +1,5 @@
 /**
- * @file    SerialLinkKinematics.cpp
+ * @file    SerialLinkKinematic.cpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    August 2025
@@ -20,16 +20,16 @@
  * @see https://github.com/Woolfrey/software_simple_qp for the optimisation algorithm used in the control.
  */
 
-#include <Control/SerialLinkKinematics.h>
+#include <Control/SerialLinkKinematic.h>
 
 namespace RobotLibrary { namespace Control {
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////
  //                                          Constructor                                          //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-SerialLinkKinematics::SerialLinkKinematics(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
-		                                   const std::string &endpointName,
-		                                   const RobotLibrary::Control::SerialLinkParameters &parameters)
+SerialLinkKinematic::SerialLinkKinematic(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
+		                                 const std::string &endpointName,
+		                                 const RobotLibrary::Control::SerialLinkParameters &parameters)
 : SerialLinkBase(model, endpointName, parameters)
 {
     std::cout << "[INFO] [SERIAL LINK KINEMATICS] ";
@@ -40,9 +40,9 @@ SerialLinkKinematics::SerialLinkKinematics(std::shared_ptr<RobotLibrary::Model::
  //               Compute the endpoint velocity needed to track a given trajectory                //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::VectorXd
-SerialLinkKinematics::track_endpoint_trajectory(const RobotLibrary::Model::Pose &desiredPose,
-                                                const Eigen::Vector<double,6>   &desiredVelocity,
-                                                const Eigen::Vector<double,6>   &desiredAcceleration)
+SerialLinkKinematic::track_endpoint_trajectory(const RobotLibrary::Model::Pose &desiredPose,
+                                               const Eigen::Vector<double,6>   &desiredVelocity,
+                                               const Eigen::Vector<double,6>   &desiredAcceleration)
 {
     (void)desiredAcceleration;                                                                      // Not needed in velocity control
 
@@ -58,7 +58,7 @@ SerialLinkKinematics::track_endpoint_trajectory(const RobotLibrary::Model::Pose 
  //                                       This doesn't do much...!                                //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::VectorXd
-SerialLinkKinematics::resolve_endpoint_twist(const Eigen::Vector<double,6> &twist)
+SerialLinkKinematic::resolve_endpoint_twist(const Eigen::Vector<double,6> &twist)
 {
     return resolve_endpoint_motion(twist);
 }
@@ -67,7 +67,7 @@ SerialLinkKinematics::resolve_endpoint_twist(const Eigen::Vector<double,6> &twis
  //              Solve the endpoint motion required to achieve a given endpoint motion             //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::VectorXd
-SerialLinkKinematics::resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion)
+SerialLinkKinematic::resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion)
 {
     using namespace Eigen;                                                                          // Improves readability
     
@@ -175,9 +175,9 @@ SerialLinkKinematics::resolve_endpoint_motion(const Eigen::Vector<double,6> &end
  //                  Compute the joint velocities needed to track a given trajectory              //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::VectorXd
-SerialLinkKinematics::track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
-                                               const Eigen::VectorXd &desiredVelocity,
-						                       const Eigen::VectorXd &desiredAcceleration)
+SerialLinkKinematic::track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
+                                            const Eigen::VectorXd &desiredVelocity,
+						                    const Eigen::VectorXd &desiredAcceleration)
 {
 	unsigned int numJoints = _model->number_of_joints();                                            // Makes things easier
 	
@@ -210,7 +210,7 @@ SerialLinkKinematics::track_joint_trajectory(const Eigen::VectorXd &desiredPosit
  //                   Compute the instantaneous limits on the joint velocities                    //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 RobotLibrary::Model::Limits
-SerialLinkKinematics::compute_control_limits(const unsigned int &jointNumber)
+SerialLinkKinematic::compute_control_limits(const unsigned int &jointNumber)
 {
 	// Flacco, F., De Luca, A., & Khatib, O. (2015).
 	// "Control of redundant robots under hard joint constraints: Saturation in the null space."
