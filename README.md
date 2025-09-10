@@ -1,8 +1,6 @@
 # :robot: Robot Library
 
-Robot Library is a C++ package for modeling, trajectory generation, and control of robots. The current release supports velocity, torque, and (inertia-free) impedance control. Check out the following repositories to see it in action:
-- [Velocity control](https://github.com/Woolfrey/control_serial_link_velocity), or
-- [Impedance control](https://github.com/Woolfrey/control_kuka_impedance).
+Robot Library is a C++ package for modeling, trajectory generation, and control of robots. The current release supports velocity, and (inertia-free) impedance control of serial link robot arms.
 
 #### :sparkles: Features:
 - _Everything_ is contained in _one_ library: modeling, control, _and_ trajectory generation.
@@ -201,8 +199,8 @@ make
 If you would like to see examples where `RobotLibrary` has been applied, you can check out:
 
 - [Serial Link Action Server](https://github.com/Woolfrey/server_serial_link) : My own ROS2 action servers for control,
-- [Kuka iiwa14 velocity control](https://github.com/Woolfrey/control_kuka_velocity) : a ROS2 package which implements the former action server, and
-- [TestingRobotLibrary](https://github.com/Woolfrey/testing_robot_library) : C++ executables I use for numerical validation of RobotLibrary.
+- [Serial Link Velocity Control](https://github.com/Woolfrey/control_serial_link_velocity) : A ROS2 package for controlling the joint or Cartesian velocity of serial link robots, or
+- [Serial Link Impedance Control](https://github.com/Woolfrey/control_serial_link_impedance) : A ROS2 package for controlling the joint or Cartesian impedance of serial link robots.
 
 [:top: Back to Top.](#robot-robot-library)
     

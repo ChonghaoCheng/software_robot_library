@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    August 2025
- * @version 2.0
+ * @version 2.0.1
  *
  * @brief   A base class providing a standardised interface for all serial link robot arm controllers.
  * 
@@ -97,7 +97,9 @@ SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTre
 void
 SerialLinkBase::update()
 {
-	_endpointPose = _endpointFrame->link->pose() * _endpointFrame->relativePose;                    // Compute new endpoint pose
+//	_endpointPose = _endpointFrame->link->pose() * _endpointFrame->relativePose;                    // Compute new endpoint pose
+
+    _endpointPose = _model->frame_pose(_endpointFrame);                                             // Call thread-safe method
 	                      
     _jacobianMatrix = _model->jacobian(_endpointFrame);                                             // Jacobian for the endpoint
 	                      
@@ -137,9 +139,9 @@ SerialLinkBase::set_redundant_task(const Eigen::VectorXd &task)
 Eigen::Vector<double,6>
 SerialLinkBase::pose_error(const RobotLibrary::Model::Pose &desired)
 {
-    Eigen::Vector<double,6> error = _endpointPose.error(desired);
+    Eigen::Vector<double,6> error = _endpointPose.error(desired);                                   // Get position & orientation error
 
-    _positionError = error.head(3).norm();
+    _positionError = error.head(3).norm();                                                          // Save internally for future use
 
     Eigen::Quaterniond orientationError = desired.quaternion() * _endpointPose.quaternion().inverse();
 

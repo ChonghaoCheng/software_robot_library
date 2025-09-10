@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    August 2025
- * @version 1.0
+ * @version 1.0.1
  *
  * @brief   Implements control laws for joint and Cartesian impedance control.
  * 
@@ -87,26 +87,19 @@ SerialLinkImpedance::map_wrench_to_torque(const Eigen::Vector<double,6> &wrench)
 
     VectorXd jointTorques = VectorXd::Zero(n);
     
-    if (n <= 6)
-    {
-        jointTorques = _jacobianMatrix.transpose() * wrench;                                        // Too easy ;)
-    }
-    else
-    {
-        Eigen::VectorXd nullSpaceTask(n);
-        
-        for (int i = 0; i < n; ++i)
-        {
-            nullSpaceTask[i] = _jointPositionGains[i]/5.0 * (_desiredConfiguration[i] - _model->joint_positions()[i])
-                             - _jointVelocityGains[i]/5.0 *  _model->joint_velocities()[i];
-        }
-
-        const auto &[Q, R] = RobotLibrary::Math::schwarz_rutishauser(_jacobianMatrix.transpose(), 1e-06);
-        
-        jointTorques = _jacobianMatrix.transpose() * wrench
-                     + (MatrixXd::Identity(n,n) - Q * Q.transpose()) * nullSpaceTask;                             
-    }
+    Eigen::VectorXd nullSpaceTask(n);
     
+    for (int i = 0; i < n; ++i)
+    {
+        nullSpaceTask[i] = _jointPositionGains[i]/5.0 * (_desiredConfiguration[i] - _model->joint_positions()[i])
+                         - _jointVelocityGains[i]/5.0 *  _model->joint_velocities()[i];
+    }
+
+    const auto &[Q, R] = RobotLibrary::Math::schwarz_rutishauser(_jacobianMatrix.transpose(), 1e-06);
+    
+    jointTorques = _jacobianMatrix.transpose() * wrench
+                 + (MatrixXd::Identity(n,n) - Q * Q.transpose()) * nullSpaceTask; 
+                     
     // Ensure the joint torque limits are obeyed
     for (int i = 0; i < n; ++i)
     {
