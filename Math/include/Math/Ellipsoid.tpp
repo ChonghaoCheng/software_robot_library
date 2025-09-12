@@ -1,8 +1,8 @@
 /**
- * @file    Ellipoid.tpp
+ * @file    Ellipsoid.tpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
- * @date    July 2025
+ * @date    September 2025
  * @version 1.0
  * @brief   Source files for the Ellipsoid class.
  *
@@ -19,16 +19,12 @@
 
 namespace RobotLibrary { namespace Math {
 
-
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                          Constructor using the fundamental shape matrix                        //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <unsigned int Dim>
-Ellipsoid<Dim>::Ellipsoid(const Eigen::Vector<double,Dim>     &centre,
-                          const Eigen::Matrix<double,Dim,Dim> &shapeMatrix)
+Ellipsoid<Dim>::Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix)
 {
-    _centre = centre;
-    
     _shapeMatrix = shapeMatrix;
     
     _LLT = shapeMatrix.llt();
@@ -45,9 +41,9 @@ Ellipsoid<Dim>::Ellipsoid(const Eigen::Vector<double,Dim>     &centre,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <unsigned int Dim>
 double
-Ellipsoid<Dim>::distance(const Eigen::Vector<double, Dim> &point)
+Ellipsoid<Dim>::distance_to_surface(const Eigen::Vector<double, Dim> &point) const
 {
-    return sqrt(abs(distance_squared(point)));
+    return sqrt(abs(distance_to_surface_squared(point)));
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -55,21 +51,9 @@ Ellipsoid<Dim>::distance(const Eigen::Vector<double, Dim> &point)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <unsigned int Dim>
 double
-Ellipsoid<Dim>::distance_squared(const Eigen::Vector<double, Dim> &point) const
+Ellipsoid<Dim>::distance_to_surface_squared(const Eigen::Vector<double, Dim> &point) const
 {
-    Eigen::Vector<double, Dim> v = point - _centre;
-    
-    return v.dot(_LLT.solve(v)) - 1.0;
-}
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                          Determine if a point is inside the ellipsoid or not                   //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-template <unsigned int Dim>
-bool
-Ellipsoid<Dim>::is_inside(const Eigen::Vector<double, Dim> &point)
-{
-    return distance_squared(point) < 0.0;
+    return point.dot(_LLT.solve(point)) - 1.0;
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -79,7 +63,7 @@ template <unsigned int Dim>
 Eigen::Vector<double, Dim>
 Ellipsoid<Dim>::inverse_shape_transformed_vector(const Eigen::Vector<double,Dim> &point) const
 {
-    return _LLT.solve(point - _centre);
+    return _LLT.solve(point);
 }
 
 } } // namespace
