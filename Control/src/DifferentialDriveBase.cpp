@@ -23,11 +23,14 @@ namespace RobotLibrary { namespace Control {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 DifferentialDriveBase::DifferentialDriveBase(const double &controlFrequency,
                                              const double &minimumSafeDistance,
-                                             const RobotLibrary::Model::DifferentialDriveParameters &modelParameters)
+                                             const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
+                                             const SolverOptions<double> &solverOptions)
 : DifferentialDrive(modelParameters),
   _controlFrequency(controlFrequency),
-  _minimumSafeDistance(minimumSafeDistance)
+  _minimumSafeDistance(minimumSafeDistance),
+  QPSolver<double>(solverOptions)
 {
+    // Esnure input arguments are sound
     if (_controlFrequency <= 0.0)
     {
         throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE BASE] Constructor: "
@@ -40,6 +43,15 @@ DifferentialDriveBase::DifferentialDriveBase(const double &controlFrequency,
                                     "Minimum safe distance must be positive ("
                                     + std::to_string(_minimumSafeDistance) + " <= 0.0)");
     }
+    
+    // Set the constraint matrix here to save time later:
+    
+    _controlConstraintMatrix << 1.0,  0.0,
+                                0.0,  1.0,
+                               -1.0,  0.0,
+                                0.0, -1.0;
+                                
+    _obstacleConstraintMatrix.resize(0,2);
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
