@@ -70,6 +70,8 @@ struct DifferentialDriveFeedbackParameters
     double orientationGain     =  10.0;                                                             ///< Feedback gain on orientation error   
     double xPositionGain       =   5.0;                                                             ///< Feedback gain on x position error
     double yPositionGain       =  25.0;                                                             ///< Feedback gain on y position error
+
+    SolverOptions<double> qpsolver = SolverOptions<double>();                                       ///< For underlying QP solver
 };
 
 /**
