@@ -69,7 +69,7 @@ Pose2D::rotation() const
  //                      Get the inverse that "undoes" a rotation                                 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 Pose2D
-Pose2D::inverse()
+Pose2D::inverse() const
 {
     return Pose2D(-rotation().transpose() * _translation, -_angle);
 }

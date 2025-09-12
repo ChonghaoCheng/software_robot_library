@@ -88,7 +88,7 @@ class Pose2D
            * @brief  Computes the inverse / opposite of this pose.
            */
           Pose2D
-          inverse();
+          inverse() const;
           
           /**
            * @brief Multiply this pose with another to produce a third.
