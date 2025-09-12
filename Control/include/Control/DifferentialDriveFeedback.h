@@ -22,6 +22,7 @@
 
 #include <Control/DataStructures.h>
 #include <Control/DifferentialDriveBase.h>
+#include <Model/Obstacle2D.h>
 
 namespace RobotLibrary { namespace Control {
 
@@ -51,7 +52,8 @@ class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriv
          */
         Eigen::Vector2d
         track_trajectory(const RobotLibrary::Model::Pose2D &desiredPose,
-                         const Eigen::Vector2d &desiredVelocity);
+                         const Eigen::Vector2d &desiredVelocity,
+                         const std::vector<RobotLibrary::Model::Obstacle2D> &obstacles);
 
         private:
             

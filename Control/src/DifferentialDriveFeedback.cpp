@@ -28,12 +28,15 @@ DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::
                                                      const RobotLibrary::Control::DifferentialDriveFeedbackParameters &controlParameters)
 : DifferentialDriveBase(controlParameters.controlFrequency,
                         controlParameters.minimumSafeDistance,
-                        modelParameters),
+                        modelParameters,
+                        controlParameters.qpsolver),
   _orientationGain(controlParameters.orientationGain),
   _xPositionGain(controlParameters.xPositionGain),
   _yPositionGain(controlParameters.yPositionGain)
 {
-    if (_xPositionGain <= 0 or _yPositionGain <= 0 or _orientationGain <= 0)
+    if (_xPositionGain   <= 0
+    or  _yPositionGain   <= 0
+    or  _orientationGain <= 0)
     {
         throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] Constructor: "
                                     "Feedback control gains must be positive, but "
@@ -48,7 +51,8 @@ DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
 DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &desiredPose,
-                                            const Eigen::Vector2d &desiredVelocity)
+                                            const Eigen::Vector2d &desiredVelocity,
+                                            const std::vector<RobotLibrary::Model::Obstacle2D> &obstacles)
 {
     // Kanayama, Y., Kimura, Y., Miyazaki, F., & Noguchi, T. (1990, May).
     // A stable tracking control method for an autonomous mobile robot.
@@ -61,18 +65,42 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     double epsilon_x =  e[0] * cos(_pose.angle()) + e[1] * sin(_pose.angle());
     double epsilon_y = -e[0] * sin(_pose.angle()) + e[1] * cos(_pose.angle());
     
-    // Compute the feedback control
-    double linearVelocity  = desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x;
-    double angularVelocity = desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2]);
+    /* Solve a QP problem of the form:
+     *  min_u 1/2 (u_d - u)^T M (u_d - u)
+     *  subject to: B * u <= z
+     * Hessian H == M, and f == - M * u_d
+     */
     
-    // Limit the results
+    Eigen::Matrix2d H;
+    H << _mass,      0.0,
+           0.0, _inertia;
+                           
+    Eigen::Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
+                          -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
+    
     RobotLibrary::Model::Limits linear, angular;
-    compute_control_limits(linear, angular, _velocity);
     
-    linearVelocity  = std::clamp(linearVelocity,   linear.lower,  linear.upper);
-    angularVelocity = std::clamp(angularVelocity, angular.lower, angular.upper);
+    compute_control_limits(linear, angular, velocity());
+
+    _controlConstraintVector <<  linear.upper,
+                                angular.upper,
+                                -linear.lower,
+                               -angular.lower;
+     
+    int n = obstacles.size();                                                                       // Makes referencing easier                          
+                               
+    _constraintMatrix.resize(4+n,2);
+    _constraintMatrix.block(0,0,4,2) = _controlConstraintMatrix;
+    _constraintMatrix.block(4,0,n,2) = _obstacleConstraintMatrix;
     
-    return {linearVelocity, angularVelocity};
+    _constraintVector.resize(4+n);
+    _constraintVector.head(4) = _controlConstraintVector;
+    _constraintVector.tail(n) = _obstacleConstraintVector;
+    
+    // NOTE: For some reason, in low dimensions, the QP solver needs a tiny kick-start
+    Eigen::Vector2d u = solve(H,f,_constraintMatrix, _constraintVector, velocity());
+    
+    return {u[0], u[1]};
 }
 
 } } // Namespace                                                                                      
