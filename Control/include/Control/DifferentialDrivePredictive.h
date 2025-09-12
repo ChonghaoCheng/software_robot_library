@@ -33,8 +33,7 @@ namespace RobotLibrary { namespace Control {
  * @brief A class that performs nonlinear feedback control for trajectory tracking of a differential
  *        drive mobile robot.
  */
-class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDriveBase,
-                                    public QPSolver<double>
+class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDriveBase
 {
     public:
     
@@ -94,19 +93,7 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
         unsigned int _numberOfRecursions;                                                           ///< Number of backward + forward passes
        
         Eigen::Matrix3d _finalPoseErrorWeight;                                                      ///< Weighting matrix on the final pose error
-        
-        Eigen::Matrix<double,4,2> _controlConstraintMatrix;                                         ///< Used in the QP solver to ensure control inputs are within bounds
-        
-        Eigen::Matrix<double,Eigen::Dynamic,2> _obstacleConstraintMatrix;                           ///< Used in the QP solver to avoid collision with obstacles
-        
-        Eigen::Matrix<double,Eigen::Dynamic,2> _constraintMatrix;                                   ///< Full constraint matrix passed to the QP solver
-        
-        Eigen::Vector<double,4> _controlConstraintVector;                                           ///< Use in the QP solver to ensure control input is within limits
-        
-        Eigen::VectorXd _obstacleConstraintVector;                                                  ///< Used in the QP solve to avoid collision with obstacles
-        
-        Eigen::VectorXd _constraintVector;                                                          ///< Full constraint vector passed to the QP solver
-        
+ 
         std::vector<Eigen::Matrix3d> _poseErrorWeight;                                              ///< Weighting matrix on the intermediate pose error
         
         std::vector<Eigen::Matrix2d> _controlWeight;                                                ///< Weighting on the intermediate control

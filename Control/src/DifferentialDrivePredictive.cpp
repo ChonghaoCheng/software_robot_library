@@ -32,8 +32,8 @@ DifferentialDrivePredictive::DifferentialDrivePredictive(RobotLibrary::Model::Di
                                                          SolverOptions<double> &solverOptions)
 : DifferentialDriveBase(controlParameters.controlFrequency,
                         controlParameters.minimumSafeDistance,
-                        modelParameters),
-  QPSolver<double>(solverOptions),
+                        modelParameters,
+                        solverOptions),
  _numberOfRecursions(controlParameters.numberOfRecursions),
  _predictionSteps(controlParameters.predictionSteps),
  _threshold(controlParameters.maximumControlStepNorm)
@@ -68,11 +68,6 @@ DifferentialDrivePredictive::DifferentialDrivePredictive(RobotLibrary::Model::Di
         _poseErrorWeight[j] = scalar * controlParameters.poseErrorWeight;
     }
 
-    // Control Weights (Exponentially Scaled Inertia Matrix)
-    Eigen::Matrix2d inertiaMatrix;
-    inertiaMatrix << _mass,  0.0,
-                      0.0, _inertia;
-
     std::vector<double> expWeights(_predictionSteps);
 
     // Compute exponential profile
@@ -90,17 +85,8 @@ DifferentialDrivePredictive::DifferentialDrivePredictive(RobotLibrary::Model::Di
     for (int i = 0; i < _predictionSteps; ++i)
     {
         double weight = expWeights[i] * scale;
-        _controlWeight[i] = weight * inertiaMatrix;
-    }
-    
-    // Set up the constraint matrices in advance to save time:
-
-    _controlConstraintMatrix << -1.0,  0.0,
-                                 0.0, -1.0,
-                                 1.0,  0.0,
-                                 0.0,  1.0;
-                                 
-    _obstacleConstraintMatrix.resize(0,2);                                                         
+        _controlWeight[i] = weight * _inertiaMatrix;
+    }                                                 
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -116,7 +102,7 @@ DifferentialDrivePredictive::update_state(const RobotLibrary::Model::Pose2D &pos
     // Transfer these from the base class so we can access them via index in the
     // backward / forward recursions
     _predictedStates[0].pose       = _pose;
-    _predictedStates[0].velocity   = _velocity;
+    _predictedStates[0].velocity   = this->velocity();                                              // Need "this->" to refer to the method in the base class
     _predictedStates[0].covariance = _covariance;
     
     // Shift the predicted states backward
