@@ -21,13 +21,14 @@
 
 #include <Model/DataStructures.h>
 #include <Model/Pose2D.h>
+#include <Model/RigidBody2D.h>
 
 namespace RobotLibrary { namespace Model {
 
 /**
  * @brief A class for modeling the kinematics of a planar, mobile robot.
  */
-class DifferentialDrive
+class DifferentialDrive : public RigidBody2D
 {
     public:
     
@@ -46,31 +47,13 @@ class DifferentialDrive
         update_state(const RobotLibrary::Model::Pose2D &pose,
                      const Eigen::Vector2d &velocity,
                      const Eigen::Matrix3d &covariance = Eigen::Matrix3d::Identity());
-                                                          
-        /**
-         * @brief Get the current pose of the robot.
-         * @return What you asked for.
-         */
-        RobotLibrary::Model::Pose2D
-        pose() const { return _pose; }
         
         /**
-         * @brief Get the current velocity of the robot.
+         * @brief Get the current velocity.
+         * @return A 2D vector containing the linear velocity (m/s), and angular velocity (rad/s).
          */
         Eigen::Vector2d
-        velocity() const { return _velocity; }
-        
-        /**
-         * @brief Get the mass of the robot.
-         */
-        double
-        mass() const { return _mass; }
-        
-        /**
-         * @brief Get the inertia of the robot.
-         */
-        double
-        inertia() const { return _inertia; }
+        velocity();
         
         /**
          * @brief Get the (predicted) next pose given a current pose & velocity.
@@ -100,22 +83,25 @@ class DifferentialDrive
          * @brief Partial derivative of configuration propagation w.r.t configuration.
          * @param pose The current position & orientation
          * @param velocity The current linear & angular velocity
-         * @return A pose object as SE(2)
+         * @return A 3x3 matrix.
          */
         Eigen::Matrix3d
         configuration_jacobian(const RobotLibrary::Model::Pose2D &pose,
                                const Eigen::Vector2d &velocity,
                                const double &controlFrequency);
-                               
+           
+        /**
+         * @brief Partial derivative of configuration propagation w.r.t. control input.
+         * @param pose The current position & orientation.
+         * @param velocity The current linear and angular velocity.
+         * @return a 3x2 matrix.
+         */
         Eigen::Matrix<double,3,2>
         control_jacobian(const RobotLibrary::Model::Pose2D &pose,
                          const double &controlFrequency);
+                         
     protected:
-        
-        double _inertia;                                                                            ///< Rotational inertia of the robot (kg*m^2)
-        
-        double _mass;                                                                               ///< Mass of the robot (kg)
-        
+         
         double _maxAngularAcceleration;                                                             ///< Maximum rotational acceleration (rad/s/s)
         
         double _maxAngularVelocity;                                                                 ///< Maximum rotational speed (rad/s)
@@ -126,20 +112,9 @@ class DifferentialDrive
         
         double _minimumSafeDistance;                                                                ///< For safety / collision checking
         
-        Eigen::Vector2d _velocity = {0.0, 0.0};                                                     ///< Forward speed (m/s), and turn rate (rad/s)      
-                
-        RobotLibrary::Model::Pose2D _pose;                                                          ///< Position & orientation of the robot
-        
         Eigen::Matrix3d _covariance = Eigen::Matrix3d::Identity();                                  ///< Uncertainty of the pose
 
         Eigen::Matrix3d _propagationUncertainty = Eigen::Matrix3d::Identity();                      ///< Additional uncertainty on pose propagation
-
-        Eigen::Vector3d _robotFootprint;                                                            ///< Vector containing the robot distances of the robot footprint circle from central pose
-
-        Eigen::Vector3d _robotRadii;                                                                ///< Vector containing the robot footprint circle radii
-
-
-
 }; 
 
 } } // namespace

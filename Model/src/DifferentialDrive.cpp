@@ -24,8 +24,7 @@ namespace RobotLibrary { namespace Model {
  //                                         Constructor                                            //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriveParameters &parameters)
-: _inertia(parameters.inertia),
-  _mass(parameters.mass),
+: RigidBody2D(parameters.mass, parameters.inertia),
   _maxAngularAcceleration(parameters.maxAngularAcceleration),
   _maxAngularVelocity(parameters.maxAngularVelocity),
   _maxLinearAcceleration(parameters.maxLinearAcceleration),
@@ -84,12 +83,28 @@ DifferentialDrive::update_state(const RobotLibrary::Model::Pose2D &pose,
                                     "(Absolute) angular velocity greater than maximum ("
                                     + std::to_string(abs(velocity[1])) + " > " + std::to_string(_maxAngularVelocity) + ").");
     }
-    
-    _pose = pose;                                                                                   // Simple enough...! 
+
     _covariance  = covariance;                                                                      // Uncertainty of the pose   
-    _velocity[0] = velocity[0];                                                                     // Linear velocity  
-    _velocity[1] = velocity[1];                                                                     // Angular velocity
+    
+    // Update properties of underlying RigidBody2D object  
+    _pose     = pose;                                                                               // Simple enough...!
+    _twist[0] = velocity[0] * cos(_pose.angle());
+    _twist[1] = velocity[0] * sin(_pose.angle());
+    _twist[2] = velocity[1];
 }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                              Get the linear and angular velocity                               //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Vector2d
+DifferentialDrive::velocity()
+{
+    Eigen::Vector2d velocity = { _twist[0] * cos(_pose.angle()) + _twist[1] * sin(_pose.angle()),
+                                 _twist[2] };
+                                 
+    return velocity;
+}
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                  Partial derivative of propagation equation w.r.t. configuration               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
