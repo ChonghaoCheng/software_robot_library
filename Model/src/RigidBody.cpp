@@ -64,8 +64,7 @@ RigidBody::update_state(const RobotLibrary::Model::Pose &pose,
      
      Eigen::Vector3d w = _twist.tail(3);                                                            // Needed so we can do cross product
      
-     for(int i = 0; i < 3; i++) _inertiaDerivative.col(i) = w.cross(_inertia.col(i));               // Perform cross product on every column
-     
+     for(int i = 0; i < 3; ++i) _inertiaDerivative.col(i) = w.cross(_inertia.col(i));               // Perform cross product on every column
 }
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////
