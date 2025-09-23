@@ -21,6 +21,7 @@
 #include <Math/Shape.h>
 #include <Model/Pose2D.h>
 #include <Model/RigidBody2D.h>
+#include <Model/Obstacle2D.h>
 
 #include <memory>
 
@@ -44,21 +45,14 @@ class Obstacle2D : public RigidBody2D
                    const std::string &name = "unnamed");
 
         /**
-         * @brief Computes the distance from a point to the obstacle's surface.
-         * @param point A 2D vector in the global reference frame.
-         * @return The (Euclidean?) distance to the surface of the obstacle.
+         * @brief Get a point on the surface of the obstacle.
+         * @note May not be the actual closest point, depending on the underlying shape.
+         * @param referencePoint An external point used in the computation.
+         * @return A 2D position vector.
          */
-        double
-        distance_to_surface(const Eigen::Vector2d &point) const;
-
-        /**
-         * @brief Computes the squared distance from a point to the obstacle's surface.
-         * @param point A 2D vector in the global reference frame.
-         * @return What you asked for.
-         */
-        double
-        distance_to_surface_squared(const Eigen::Vector2d &point) const;
-
+        Eigen::Vector2d
+        point_on_surface(const Eigen::Vector2d &referencePoint) const;
+        
     private:
     
         std::unique_ptr<Shape2D> _shape;                                                            ///< Shape in local frame

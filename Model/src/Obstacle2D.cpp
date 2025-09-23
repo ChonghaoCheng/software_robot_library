@@ -35,25 +35,14 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                                        Constructor                                             //
+ //                                  Get a point on the surface                                    //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-double
-Obstacle2D::distance_to_surface(const Eigen::Vector2d &point) const
+Eigen::Vector2d
+Obstacle2D::point_on_surface(const Eigen::Vector2d &referencePoint) const
 {
-    Eigen::Vector2d localPoint = _pose.inverse() * point;                                           // Transform to local frame
+    Eigen::Vector2d transformedPoint = _pose.inverse() * referencePoint;
     
-    return _shape->distance_to_surface(localPoint);                                                 // Get distance to shape surface
-}
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                                        Constructor                                             //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-double
-Obstacle2D::distance_to_surface_squared(const Eigen::Vector2d &point) const
-{
-    Eigen::Vector2d localPoint = _pose.inverse() * point;                                           // Convert to local frame
-    
-    return _shape->distance_to_surface_squared(localPoint);
+    return _pose * _shape->point_on_surface(transformedPoint);
 }
 
 } } // namespace RobotLibrary::Model
