@@ -37,24 +37,14 @@ class Shape
         ~Shape() = default;
 
         /**
-         * @brief Computes the closest distance to the surface of the shape.
-         * @param point A point in n-dimensional space.
-         * @return A scalar value.
-         * @note This is a virtual method and must be defined in any child class.
+         * @brief Get a point on the surface / circumference of the shape.
+         * @note Not always the closest point.
+         * @param referencePoint An external reference point used for computation.
+         * @return What you asked for.
          */
         virtual
-        double
-        distance_to_surface(const VectorType& point) const = 0;
-
-        /**
-         * @brief Computes the squared distance to the closest point on the surface of the shape.
-         * @param point A point in n-dimensional space.
-         * @return A positive scalar.
-         * @note This virtual method should be defined in any child class.
-         */
-        virtual
-        double
-        distance_to_surface_squared(const VectorType& point) const = 0;
+        VectorType
+        point_on_surface(const VectorType &referencePoint) const = 0;
 };
 
 // Convenience aliases
