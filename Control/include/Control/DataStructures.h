@@ -94,6 +94,17 @@ struct DifferentialDrivePredictiveParameters
                                  0.0,  -0.09,  0.10).finished();
 };
 
+/**
+ * @brief A container for a control barrier function.
+ * @note Standard form for optimsation is -\dot{b}^T * u \le \alpha(b)
+ */
+struct BarrierConstraints
+{
+    double scalar;                                                                                  ///< Right-hand-side of the CBF
+    
+    Eigen::Matrix<double,1,Eigen::Dynamic> rowVector;                                               ///< Left-hand-side of the CBF
+};
+
 } } // namespace
 
 #endif
