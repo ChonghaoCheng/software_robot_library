@@ -30,7 +30,7 @@ namespace RobotLibrary { namespace Math {
 /**
  * @brief A class for representing n-dimensional ellipsoids. Given the center c, and shape matrix A,
  *        an ellipsoid satisfies (p - c)^T * A^-1 * (p - c) = 1 for any point p on its surface.
- *        Note that the center is assumed to be c = 0.
+ * @Note  The center is assumed to be c = 0.
  */
 template <unsigned int Dim>
 class Ellipsoid : public Shape<Dim>
@@ -45,34 +45,17 @@ class Ellipsoid : public Shape<Dim>
         Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix);
                          
         /**
-         * @brief Get the distance to a point.
-         * @param point What you'd expect.
+         * @brief Get a point on the circumference on the ray to the center.
+         * @note This method overrides the one in the base class.
+         * @param referencePoint An external reference point used for computation.
          * @return What you asked for.
-         */
-        double
-        distance_to_surface(const Eigen::Vector<double,Dim> &point) const override;
-        
-        /**
-         * @brief Computes the squared distance from the surface of the ellipsoid.
-         * @param point What you want the distance to.
-         * @return What you asked for.
-         */
-        double
-        distance_to_surface_squared(const Eigen::Vector<double,Dim> &point) const override;
-        
-        /**
-         * @brief Get the transformation A^{-1} * (p - c)
-         * @param point The point offset from the center.
-         * @return The transformed vector.
          */
         Eigen::Vector<double,Dim>
-        inverse_shape_transformed_vector(const Eigen::Vector<double,Dim> &point) const;
+        point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const override;
 
     private:
         
         Eigen::LLT<Eigen::Matrix<double, Dim, Dim>> _LLT;                                           ///< Cholesky decomposition of the shape matrix.
-
-        Eigen::Vector<double, Dim> _centre;                                                         ///< Center of the ellipsoid
         
         Eigen::Matrix<double, Dim, Dim> _shapeMatrix;                                               ///< A positive definite matrix describing its shape
 };

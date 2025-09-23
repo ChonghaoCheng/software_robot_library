@@ -37,33 +37,13 @@ Ellipsoid<Dim>::Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix)
 }
         
   ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                                 Compute the distance to a point                                //
+ //                       Get a point on the surface along a ray to the center                     //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <unsigned int Dim>
-double
-Ellipsoid<Dim>::distance_to_surface(const Eigen::Vector<double, Dim> &point) const
+Eigen::Vector<double,Dim>
+Ellipsoid<Dim>::point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const
 {
-    return sqrt(abs(distance_to_surface_squared(point)));
-}
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                              Compute the squared distance to a point                           //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-template <unsigned int Dim>
-double
-Ellipsoid<Dim>::distance_to_surface_squared(const Eigen::Vector<double, Dim> &point) const
-{
-    return point.dot(_LLT.solve(point)) - 1.0;
-}
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                  Inverse of the shape matrix multiplied by displacement from center            //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-template <unsigned int Dim>
-Eigen::Vector<double, Dim>
-Ellipsoid<Dim>::inverse_shape_transformed_vector(const Eigen::Vector<double,Dim> &point) const
-{
-    return _LLT.solve(point);
+    return referencePoint / sqrt(referencePoint.dot(_LLT.solve(referencePoint)));
 }
 
 } } // namespace
