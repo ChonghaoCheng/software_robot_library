@@ -98,7 +98,7 @@ Pose2D::operator*= (const Pose2D &other)
  //                                    Transform a vector                                         //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
-Pose2D::operator* (const Eigen::Vector2d &other)
+Pose2D::operator* (const Eigen::Vector2d &other) const
 {
     return _translation + rotation() * other;
 }

@@ -106,7 +106,7 @@ class Pose2D
            * @brief Apply a point transformation to a vector.
            */
           Eigen::Vector2d
-          operator* (const Eigen::Vector2d &other);
+          operator* (const Eigen::Vector2d &other) const;
           
           /**
            * @brief Return the angle member of this class.
