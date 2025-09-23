@@ -78,15 +78,15 @@ DifferentialDriveBase::compute_control_limits(RobotLibrary::Model::Limits &linea
     {
         throw std::logic_error("[ERROR] [DIFFERENTIAL DRIVE] compute_limits(): "
                                "Lower bound for linear velocity is greater than upper bound ("
-                               + std::to_string(linear.lower) + " > " + std::to_string(linear.upper) +
-                               "). How did that happen???");
+                               + std::to_string(linear.lower) + " > " + std::to_string(linear.upper) + "). "
+                               "How did that happen???");
     }
     else if (angular.lower >= angular.upper)
     {
         throw std::logic_error("[ERROR] [DIFFERENTIAL DRIVE] compute_limits(): "
                                "Lower bound for angular velocity is greater than upper bound ("
-                               + std::to_string(angular.lower) + " > " + std::to_string(angular.upper) +
-                               "). How did that happen???");
+                               + std::to_string(angular.lower) + " > " + std::to_string(angular.upper) + "). "
+                               "How did that happen???");
     }
 }
 
