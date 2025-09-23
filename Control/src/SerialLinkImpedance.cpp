@@ -3,7 +3,7 @@
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    August 2025
- * @version 1.0.1
+ * @version 1.0.2
  *
  * @brief   Implements control laws for joint and Cartesian impedance control.
  * 
@@ -17,7 +17,6 @@
  *            Commercial use requires a license.
  *
  * @see https://github.com/Woolfrey/software_robot_library for more information.
- * @see https://github.com/Woolfrey/software_simple_qp for the optimisation algorithm used in the control.
  */
 
 #include <Control/SerialLinkImpedance.h>
@@ -85,21 +84,28 @@ SerialLinkImpedance::map_wrench_to_torque(const Eigen::Vector<double,6> &wrench)
     
     unsigned int n = _model->number_of_joints();                                                    // Makes things easier
 
-    VectorXd jointTorques = VectorXd::Zero(n);
+    VectorXd jointTorques = VectorXd::Zero(n);                                                      // We want to compute this
     
-    Eigen::VectorXd nullSpaceTask(n);
-    
-    for (int i = 0; i < n; ++i)
+    if (n < 6)
     {
-        nullSpaceTask[i] = _jointPositionGains[i]/5.0 * (_desiredConfiguration[i] - _model->joint_positions()[i])
-                         - _jointVelocityGains[i]/5.0 *  _model->joint_velocities()[i];
+        return _jacobianMatrix.transpose() * wrench;
     }
+    else
+    {   
+        Eigen::VectorXd nullSpaceTask(n);
+        
+        for (int i = 0; i < n; ++i)
+        {
+            nullSpaceTask[i] = _jointPositionGains[i] / 5.0 * (_desiredConfiguration[i] - _model->joint_positions()[i])
+                             - _jointVelocityGains[i] / 5.0 *  _model->joint_velocities()[i];
+        }
 
-    const auto &[Q, R] = RobotLibrary::Math::schwarz_rutishauser(_jacobianMatrix.transpose(), 1e-06);
-    
-    jointTorques = _jacobianMatrix.transpose() * wrench
-                 + (MatrixXd::Identity(n,n) - Q * Q.transpose()) * nullSpaceTask; 
-                     
+        const auto &[Q, R] = RobotLibrary::Math::schwarz_rutishauser(_jacobianMatrix.transpose(), 1e-06);
+        
+        jointTorques = _jacobianMatrix.transpose() * wrench
+                     + (MatrixXd::Identity(n,n) - Q * Q.transpose()) * nullSpaceTask; 
+    }
+                         
     // Ensure the joint torque limits are obeyed
     for (int i = 0; i < n; ++i)
     {
@@ -120,7 +126,8 @@ SerialLinkImpedance::resolve_endpoint_motion(const Eigen::Vector<double,6> &endp
     // NOTE: NOT USED IN THIS CLASS
     
     throw std::runtime_error("[ERROR] [SERIAL LINK IMPEDANCE] resolve_endpoint_motion(): "
-                             "This method is not used in this class. Did you mean to call `map_wrench_to_torque()'?");
+                             "This method is not used in this class. "
+                             "Did you mean to call `map_wrench_to_torque()'?");
                  
     return Eigen::VectorXd::Zero(_model->number_of_joints());                                       // Just to be safe
 }
@@ -133,13 +140,30 @@ SerialLinkImpedance::track_joint_trajectory(const Eigen::VectorXd &desiredPositi
                                             const Eigen::VectorXd &desiredVelocity,
 						                    const Eigen::VectorXd &desiredAcceleration)
 {
-    unsigned int n = _model->number_of_joints();
+    unsigned int n = _model->number_of_joints();                                                    // Makes referencing easier
     
-    Eigen::VectorXd jointTorques(n);
+    // Ensure input argument are sound
+    if (desiredPosition.size() != n)
+    {
+        throw std::invalid_argument("[ERROR] [SERIAL LINK IMPEDANCE] track_joint_trajectory(): "
+                                    "Position argument had " + std::to_string(desiredPosition.size()) + " elements, "
+                                    "but expected " + std::to_string(n) + ".");
+    }
+    else if (desiredVelocity.size() != n)
+    {
+        throw std::invalid_argument("[ERROR] [SERIAL LINK IMPEDANCE] track_joint_trajectory(): "
+                                    "Velocity argument had " + std::to_string(desiredVelocity.size()) + " elements, "
+                                    "but expected " + std::to_string(n) + ".");  
+    }  
+    
+    // NOTE: desiredAcceleration not used in this method
+    
+    Eigen::VectorXd jointTorques(n);                                                                // We want to compute thiss
     
     for (int i = 0; i < n; ++i)
     {
         RobotLibrary::Model::Limits positionLimits = _model->link(i)->joint().position_limits();
+        
         double speedLimit = _model->link(i)->joint().speed_limit();
         
         double positionReference = std::clamp(desiredPosition[i], positionLimits.lower + 1e-03, positionLimits.upper - 1e-03);
@@ -196,7 +220,7 @@ SerialLinkImpedance::compute_control_limits(const unsigned int &jointNumber)
 	                           
 	limits.upper = _model->link(jointNumber)->joint().effort_limit();
 	
-	if(limits.lower > limits.upper)
+	if (limits.lower > limits.upper)
 	{
 	    throw std::logic_error("[ERROR] [SERIAL DYNAMIC CONTROL] compute_control_limits(): "
 	                           "Lower limit for the '" + _model->link(jointNumber)->joint().name() + "' joint is greater than "
@@ -206,6 +230,5 @@ SerialLinkImpedance::compute_control_limits(const unsigned int &jointNumber)
 	                
 	return limits;
 }
-
 
 } } // namespace
