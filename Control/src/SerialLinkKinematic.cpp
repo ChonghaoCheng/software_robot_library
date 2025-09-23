@@ -93,7 +93,7 @@ SerialLinkKinematic::resolve_endpoint_motion(const Eigen::Vector<double,6> &endp
     _constraintMatrix.row(2 * numJoints)            = -manipulabilityGradient.transpose();          // Part of the control barrier function
     _constraintVector.head(numJoints)               = upperBound;
     _constraintVector.segment(numJoints, numJoints) = -lowerBound;
-    _constraintVector(2 * numJoints)                = (_manipulability - _minManipulability) * 100 * sqrt(_controlFrequency);
+    _constraintVector(2 * numJoints)                = (_manipulability - _minManipulability) * _controlFrequency;
 
     VectorXd controlVelocity = VectorXd::Zero(numJoints);                                           // We need to compute this
 
