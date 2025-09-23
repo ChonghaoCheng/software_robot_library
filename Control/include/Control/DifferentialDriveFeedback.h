@@ -20,9 +20,7 @@
 #ifndef DIFFERENTIAL_DRIVE_FEEDBACK_H
 #define DIFFERENTIAL_DRIVE_FEEDBACK_H
 
-#include <Control/DataStructures.h>
 #include <Control/DifferentialDriveBase.h>
-#include <Model/Obstacle2D.h>
 
 namespace RobotLibrary { namespace Control {
 
@@ -58,9 +56,17 @@ class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriv
         private:
             
             double _orientationGain = 5.0;                                                          ///< Feedback gain on orientation error
+            
             double _xPositionGain   = 1.0;                                                          ///< Feedback gain on x-translation error       
+            
             double _yPositionGain   = 50.0;                                                         ///< Feedback gain on y-translation error           
-
+ 
+            /**
+             * @brief Compute the control barrier constraints for an obstacle.
+             */
+            RobotLibrary::Control::BarrierConstraints
+            compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                        const RobotLibrary::Model::Obstacle2D &obstacle);
 };                                                                                                  // Semicolon needed after class declaration
 
 } } // Namespace                                                                                      

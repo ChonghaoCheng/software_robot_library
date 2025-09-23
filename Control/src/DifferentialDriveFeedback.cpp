@@ -65,11 +65,10 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     double epsilon_x =  e[0] * cos(_pose.angle()) + e[1] * sin(_pose.angle());
     double epsilon_y = -e[0] * sin(_pose.angle()) + e[1] * cos(_pose.angle());
     
-    /* Solve a QP problem of the form:
-     *  min_u 1/2 (u_d - u)^T M (u_d - u)
-     *  subject to: B * u <= z
-     * Hessian H == M, and f == - M * u_d
-     */
+    // Solve a QP problem of the form:
+    // min_u 1/2 (u_d - u)^T M (u_d - u)
+    //  subject to: B * u <= z
+    // Hessian H == M, and f == - M * u_d
     
     Eigen::Matrix2d H;
     H << _mass,      0.0,
@@ -78,6 +77,7 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     Eigen::Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
                           -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
     
+    // Compute speed limits
     RobotLibrary::Model::Limits linear, angular;
     
     compute_control_limits(linear, angular, velocity());
@@ -86,21 +86,88 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
                                 angular.upper,
                                 -linear.lower,
                                -angular.lower;
-     
-    int n = obstacles.size();                                                                       // Makes referencing easier                          
-                               
+    
+    // Compute obstacle constraints
+    int n = obstacles.size();                                                                       // Makes referencing easier                             
+    _obstacleConstraintMatrix.resize(n,2);
+    _obstacleConstraintVector.resize(n);
+    
+    for (int i = 0; i < n; ++i)
+    {
+        const auto &[scalar, rowVector] = compute_barrier_constraints(_pose, obstacles[i]);
+        
+        _obstacleConstraintMatrix.row(i) = rowVector;
+        
+        _obstacleConstraintVector(i) = scalar;
+    }
+           
     _constraintMatrix.resize(4+n,2);
     _constraintMatrix.block(0,0,4,2) = _controlConstraintMatrix;
     _constraintMatrix.block(4,0,n,2) = _obstacleConstraintMatrix;
     
     _constraintVector.resize(4+n);
     _constraintVector.head(4) = _controlConstraintVector;
-    _constraintVector.tail(n) = _obstacleConstraintVector;
+    _constraintVector.tail(n) = _obstacleConstraintVector; 
     
-    // NOTE: For some reason, in low dimensions, the QP solver needs a tiny kick-start
-    Eigen::Vector2d u = solve(H,f,_constraintMatrix, _constraintVector, velocity());
+    return solve(H,f,_constraintMatrix, _constraintVector, velocity());
+
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                 Compute the constraint barrier vector and scalar for an obstacle               //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Control::BarrierConstraints
+DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                                       const RobotLibrary::Model::Obstacle2D &obstacle)
+{
+    Eigen::Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());
     
-    return {u[0], u[1]};
+    double distance = displacement.norm() - _minimumSafeDistance;
+    
+    std::cout << "Distance to constraint: " << distance << "\n";
+    
+    Eigen::Vector2d heading(cos(pose.angle()), sin(pose.angle()));
+    
+    double projection = heading.dot(displacement.normalized());
+    
+    std::cout << "Projection: " << projection << "\n";
+    
+    if (distance < 0.0)
+    {
+        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] compute_barrier_constraints(): "
+                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
+    }
+    
+    Eigen::Vector2d rowVector;
+    rowVector[0] = projection;
+    rowVector[1] = 0.0;
+    
+    return RobotLibrary::Control::BarrierConstraints{ _controlFrequency * distance,
+                                                     -rowVector};
+    
+    /*
+
+    double distanceSquared = displacement.squaredNorm() - _minimumSafeDistance * _minimumSafeDistance;
+    
+    std::cout << "Distance to constraint: " << distanceSquared << "\n";
+    
+    if (distanceSquared < 0.0)
+    {
+        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] compute_barrier_constraints(): "
+                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
+    }
+    
+
+    Eigen::RowVector2d rowVector;
+    rowVector << 2 * ((displacement[0] * cos(pose.angle())) + (displacement[1] * sin(pose.angle()))), 0.0;
+    
+    std::cout << "Projection: " << rowVector[0] << "\n";
+
+    return RobotLibrary::Control::BarrierConstraints{
+        2000.0 * distanceSquared, // gamma * b
+       -rowVector                           // -db/du
+    };
+    */
 }
 
 } } // Namespace                                                                                      
