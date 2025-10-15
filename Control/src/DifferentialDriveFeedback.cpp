@@ -108,9 +108,16 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     _constraintVector.resize(4+n);
     _constraintVector.head(4) = _controlConstraintVector;
     _constraintVector.tail(n) = _obstacleConstraintVector; 
-    
-    return solve(H,f,_constraintMatrix, _constraintVector, velocity());
 
+    std::cout << "Matrix B:\n" << _constraintMatrix<< "\n";
+    std::cout << "Vector z:\n" << _constraintVector << "\n";
+            
+    Eigen::Vector2d u = solve(H,f,_obstacleConstraintMatrix, _obstacleConstraintVector, velocity());
+    
+    std::cout << "Solution u:\n" << u << "\n";
+    std::cout << "Distance z - Bu:\n" << _constraintVector - _constraintMatrix * u << "\n\n";
+
+    return u;
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -123,14 +130,10 @@ DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model
     Eigen::Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());
     
     double distance = displacement.norm() - _minimumSafeDistance;
-    
-    std::cout << "Distance to constraint: " << distance << "\n";
-    
+
     Eigen::Vector2d heading(cos(pose.angle()), sin(pose.angle()));
     
     double projection = heading.dot(displacement.normalized());
-    
-    std::cout << "Projection: " << projection << "\n";
     
     if (distance < 0.0)
     {
@@ -142,9 +145,11 @@ DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model
     rowVector[0] = projection;
     rowVector[1] = 0.0;
     
-    return RobotLibrary::Control::BarrierConstraints{ _controlFrequency * distance,
-                                                     -rowVector};
     
+    double gamma = 2.5;
+    
+    return RobotLibrary::Control::BarrierConstraints{ gamma * distance,
+                                                     -rowVector};
     /*
 
     double distanceSquared = displacement.squaredNorm() - _minimumSafeDistance * _minimumSafeDistance;
