@@ -116,8 +116,8 @@ DifferentialDrivePredictive::update_state(const RobotLibrary::Model::Pose2D &pos
  //                               Solve the trajectory tracking problem                            //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
-DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Model::DifferentialDriveState>   &desiredStates,
-                                              const std::vector<std::vector<RobotLibrary::Math::Ellipsoid<2>>> &obstacles)
+DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Model::DifferentialDriveState>  &desiredStates,
+                                              const std::vector<std::vector<RobotLibrary::Model::Obstacle2D>> &obstacles)
 {
     using namespace Eigen;
     using namespace RobotLibrary::Model;
@@ -130,6 +130,13 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                     "desired states for the trajectory tracking, but received "
                                     + std::to_string(desiredStates.size()) + ".");
     }
+    else if (obstacles.size() != _predictionSteps)
+    {
+        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
+                                    "This controller has N = " + std::to_string(_predictionSteps+1) + " "
+                                    "prediction steps, but the obstacle array had "
+                                    + std::to_string(obstacles.size()) + " elements.");
+    }
     
     // Run the optimisations
     for (int i = 0; i < _numberOfRecursions; ++i)
@@ -141,7 +148,6 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
         // Backwards recursions
         for (int j = _predictionSteps; j >= 0; --j)
         {    
-
             if (j == _predictionSteps)
             {
                 costateVector = _poseErrorWeight[j] * _predictedStates[j].pose.error(desiredStates[j].pose);
@@ -159,11 +165,14 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 Vector3d errorCorrection = K * nextPoseError + costateVector;
 
                 // Partial derivative of state propagation w.r.t. configuration                                                    
-                Eigen::Matrix<double,3,3> dfdx = configuration_jacobian(currentPose, currentVelocity, _controlFrequency);
+                Eigen::Matrix<double,3,3> dfdx = configuration_jacobian(currentPose,
+                                                                        currentVelocity,
+                                                                        _controlFrequency);
                     
                 // Partial derivative of state propagation w.r.t. control.
-                Eigen::Matrix<double,3,2> dfdu = control_jacobian(currentPose, _controlFrequency);
-                dfdu(2,1) = 1.0;
+                Eigen::Matrix<double,3,2> dfdu = control_jacobian(currentPose,
+                                                                  _controlFrequency);
+                dfdu(2,1) = 1.0; // NOTE: This works better for some reason???
 
                 // Partial derivative of state propagation w.r.t. configuration   
                 Eigen::Vector<double,2> dLdu = - M * (desiredVelocity - currentVelocity)
@@ -185,6 +194,19 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                             currentVelocity[1] - angular.lower,                     // -dw <= w - w_min
                                             linear.upper  - currentVelocity[0],                     //  dv <= v_max - v
                                             angular.upper - currentVelocity[1];                     //  dw <= w_max - ws
+                
+                // Set up the obstacle constraints
+                unsigned int n = obstacles[i].size();
+                _obstacleConstraintMatrix.resize(n, 2);
+                _obstacleConstraintVector.resize(n);
+                
+                for (int k = 0; k < n; ++k)
+                {
+                    const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[i][k]);
+                  
+                    _obstacleConstraintVector(k)     = scalar;                  
+                    _obstacleConstraintMatrix.row(k) = rowVector;
+                }
                 
                 // Combine the constraints
                 unsigned int numRows = _controlConstraintVector.size() + _obstacleConstraintVector.size();
@@ -243,6 +265,36 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
     }
     
     return _predictedStates[0].velocity;                                                            // Only return the 1sts
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                 Compute the constraint barrier vector and scalar for an obstacle               //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Control::BarrierConstraints
+DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                                         const RobotLibrary::Model::Obstacle2D &obstacle)
+{
+    // b(x_{i+1}) \approx b(x_i) + (db/dx)^T dx, and
+    // dx = df/du * du
+    using namespace Eigen;                                                                          // For brevity
+    
+    Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());     //(nearest?) point on surace
+    
+    double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
+
+    if (distance < 0.0)
+    {
+        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] compute_barrier_constraints(): "
+                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
+    }
+    
+    Vector2d dbdx = displacement.normalized();                                                      // Should be valid since distance > 0
+    
+    Vector2d rowVector = { dbdx[0] * cos(pose.angle()),
+                           dbdx[1] * sin(pose.angle()) };
+    
+    return { distance,
+            -rowVector };
 }
 
 } } // namespace

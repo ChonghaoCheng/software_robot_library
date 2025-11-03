@@ -55,8 +55,8 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
          * @return The linear & angular velocity to track the trajectory.
          */
         Eigen::Vector2d
-        track_trajectory(const std::vector<RobotLibrary::Model::DifferentialDriveState>   &desiredStates,
-                         const std::vector<std::vector<RobotLibrary::Math::Ellipsoid<2>>> &obstacles);
+        track_trajectory(const std::vector<RobotLibrary::Model::DifferentialDriveState>  &desiredStates,
+                         const std::vector<std::vector<RobotLibrary::Model::Obstacle2D>> &obstacles);
         
         /**
          * @brief Get the predicted state at a specified step.
@@ -99,7 +99,18 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
         std::vector<Eigen::Matrix2d> _controlWeight;                                                ///< Weighting on the intermediate control
   
         std::vector<RobotLibrary::Model::DifferentialDriveState> _predictedStates;                  ///< Pose, velocity, and covariance over the prediction horizon
-                
+
+        /**
+         * @brief Compute the components needed to insert a CBF in to a QP solver.
+         * @note This overrides the virtual method in the base class.
+         * @param pose The position and orientation of the robot for which to compute the CBF.
+         * @param obstacle I think it's obvious.
+         * @return A struct containing a row vector and a scalar.
+         * @note This is a virtual method and must be defined in any derived class.
+         */
+        RobotLibrary::Control::BarrierConstraints
+        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                    const RobotLibrary::Model::Obstacle2D &obstacle);
 };                                                                                                  // Semicolon needed after class declaration
 
 } } // Namespace                                                                                      
