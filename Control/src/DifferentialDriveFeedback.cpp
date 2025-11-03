@@ -108,15 +108,9 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     _constraintVector.resize(4+n);
     _constraintVector.head(4) = _controlConstraintVector;
     _constraintVector.tail(n) = _obstacleConstraintVector; 
-
-    std::cout << "Matrix B:\n" << _constraintMatrix<< "\n";
-    std::cout << "Vector z:\n" << _constraintVector << "\n";
-            
-    Eigen::Vector2d u = solve(H,f,_obstacleConstraintMatrix, _obstacleConstraintVector, velocity());
-    
-    std::cout << "Solution u:\n" << u << "\n";
-    std::cout << "Distance z - Bu:\n" << _constraintVector - _constraintMatrix * u << "\n\n";
-
+       
+    Eigen::Vector2d u = solve(H,f,_constraintMatrix, _constraintVector, velocity());
+ 
     return u;
 }
 
@@ -127,52 +121,31 @@ RobotLibrary::Control::BarrierConstraints
 DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
                                                        const RobotLibrary::Model::Obstacle2D &obstacle)
 {
-    Eigen::Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());
+    using namespace Eigen;                                                                          // For brevity
     
-    double distance = displacement.norm() - _minimumSafeDistance;
+    Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());     //(nearest?) point on surace
+    
+    double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
 
-    Eigen::Vector2d heading(cos(pose.angle()), sin(pose.angle()));
-    
-    double projection = heading.dot(displacement.normalized());
-    
     if (distance < 0.0)
     {
         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] compute_barrier_constraints(): "
                                  "Collision with '" + obstacle.name() + "' obstacle detected.");
     }
     
+    Vector2d heading(cos(pose.angle()), sin(pose.angle()));                                         // A unit vector
+    
+    double projection = heading.dot(displacement.normalized());                                     // If > 0, then robot is heading toward obstacle
+    
+    // Set up row vector for constraint matrix
     Eigen::Vector2d rowVector;
     rowVector[0] = projection;
     rowVector[1] = 0.0;
     
-    
-    double gamma = 2.5;
+    double gamma = 2.5; // NEED TO RE-EXAMINE THIS?
     
     return RobotLibrary::Control::BarrierConstraints{ gamma * distance,
                                                      -rowVector};
-    /*
-
-    double distanceSquared = displacement.squaredNorm() - _minimumSafeDistance * _minimumSafeDistance;
-    
-    std::cout << "Distance to constraint: " << distanceSquared << "\n";
-    
-    if (distanceSquared < 0.0)
-    {
-        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] compute_barrier_constraints(): "
-                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
-    }
-    
-
-    Eigen::RowVector2d rowVector;
-    rowVector << 2 * ((displacement[0] * cos(pose.angle())) + (displacement[1] * sin(pose.angle()))), 0.0;
-    
-    std::cout << "Projection: " << rowVector[0] << "\n";
-
-    return RobotLibrary::Control::BarrierConstraints{
-        2000.0 * distanceSquared, // gamma * b
-       -rowVector                           // -db/du
-    };
-    */
 }
 
 } } // Namespace                                                                                      
