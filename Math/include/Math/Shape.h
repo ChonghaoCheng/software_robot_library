@@ -45,6 +45,11 @@ class Shape
         virtual
         VectorType
         point_on_surface(const VectorType &referencePoint) const = 0;
+
+        virtual
+        Eigen::Matrix2d
+        get_shape_matrix() const = 0;
+
 };
 
 // Convenience aliases

@@ -196,13 +196,13 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                             angular.upper - currentVelocity[1];                     //  dw <= w_max - ws
                 
                 // Set up the obstacle constraints
-                unsigned int n = obstacles[i].size();
+                unsigned int n = obstacles[j].size();
                 _obstacleConstraintMatrix.resize(n, 2);
                 _obstacleConstraintVector.resize(n);
-                
+                bool use_ellipsoid = true;
                 for (int k = 0; k < n; ++k)
                 {
-                    const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[i][k]);
+                    const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[j][k],use_ellipsoid);
                   
                     _obstacleConstraintVector(k)     = scalar;                  
                     _obstacleConstraintMatrix.row(k) = rowVector;
@@ -297,4 +297,44 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
             -rowVector };
 }
 
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                 Compute the constraint barrier vector and scalar for an obstacle               //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Control::BarrierConstraints
+DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                                         const RobotLibrary::Model::Obstacle2D &obstacle,
+                                                         bool ellipse)
+{
+    // b(x_{i+1}) \approx b(x_i) + (db/dx)^T dx, and
+    // dx = df/du * du
+    using namespace Eigen;  // For brevity  
+    Vector2d robot_to_obs = pose.translation()-obstacle.pose().translation();
+
+    Vector2d b_unit = {cos(pose.angle()),sin(pose.angle())};
+    
+    Matrix<double,3,2> dfdu = control_jacobian(pose,_controlFrequency);
+    
+    double distance = robot_to_obs.transpose()* obstacle.inertia_matrix().inverse() * robot_to_obs   + b_unit.dot(obstacle.point_on_surface(pose.translation())); // Magnitude of the distance
+    std::cout<<"\nEllipse matrix\n" <<  obstacle.inertia_matrix().inverse();
+    if (distance - _minimumSafeDistance< 0.0)
+    {
+        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] compute_barrier_constraints(): "
+                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
+    }
+    
+    Eigen::Matrix2d dbdu = Eigen::Matrix2d::Zero();
+    dbdu(0,1) = -sin(pose.angle())/_controlFrequency;
+    dbdu(1,1) = cos(pose.angle())/_controlFrequency;
+
+    Vector2d dhdx = 2*robot_to_obs.transpose()*obstacle.inertia_matrix().inverse()*dfdu.block(0,0,2,2) + robot_to_obs.normalized().transpose()*dbdu +  (1/robot_to_obs.norm())*(b_unit.transpose() + b_unit.transpose()*(robot_to_obs*robot_to_obs.transpose()))*dfdu.block(0,0,2,2);  ;                                                      // Should be valid since distance > 0
+    
+    
+    
+    return { distance - _minimumSafeDistance,
+            -dhdx };
+}
+
+
 } } // namespace
+
+

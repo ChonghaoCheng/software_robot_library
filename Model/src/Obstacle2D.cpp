@@ -32,6 +32,7 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
     // Worker bees can leave.
     // Even drones can fly away.
     // The Queen is their slave.
+    _inertiaMatrix = _shape->get_shape_matrix();
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +43,7 @@ Obstacle2D::point_on_surface(const Eigen::Vector2d &referencePoint) const
 {
     Eigen::Vector2d transformedPoint = _pose.inverse() * referencePoint;
     
-    return _pose * _shape->point_on_surface(transformedPoint);
+    return _shape->point_on_surface(transformedPoint);
 }
 
 } } // namespace RobotLibrary::Model

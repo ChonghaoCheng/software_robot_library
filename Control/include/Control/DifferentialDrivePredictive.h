@@ -111,6 +111,11 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
         RobotLibrary::Control::BarrierConstraints
         compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
                                     const RobotLibrary::Model::Obstacle2D &obstacle);
+        
+        RobotLibrary::Control::BarrierConstraints
+        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                                                    const RobotLibrary::Model::Obstacle2D &obstacle,
+                                                                    bool ellipse);
 };                                                                                                  // Semicolon needed after class declaration
 
 } } // Namespace                                                                                      
