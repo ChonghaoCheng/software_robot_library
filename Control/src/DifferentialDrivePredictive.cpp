@@ -200,6 +200,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 _obstacleConstraintMatrix.resize(n, 2);
                 _obstacleConstraintVector.resize(n);
                 bool use_ellipsoid = false;
+                std::cout<<"\n =============== Checking Obstacles in Recursion No: "<<i<<" At Prediction Step Number "<<j<<"=================\n";
                 for (int k = 0; k < n; ++k)
                 {
                     const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[j][k],use_ellipsoid);
@@ -299,7 +300,7 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
                            dbdx[1] * sin(pose.angle()) };
     
     return { distance,
-            -rowVector };
+            rowVector };
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -321,7 +322,7 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
     
     double distance = robot_to_obs.transpose()* obstacle.inertia_matrix().inverse() * robot_to_obs   + b_unit.dot(obstacle.point_on_surface(pose.translation())); // Magnitude of the distance
     //std::cout<<"\nEllipse matrix\n" <<  obstacle.inertia_matrix().inverse();
-    std::cout<<"\n Distance to obstacle at Pose" << pose.translation() <<" = " <<distance;
+    std::cout<<"\n Distance to obstacle at Pose x = " << pose.translation()(0)<<" y =  "<< pose.translation()(1)<<" = " <<distance;
     if (distance - _minimumSafeDistance< 0.0)
     {
         ellipse = true;
@@ -335,7 +336,7 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
     dbdu(1,1) = cos(pose.angle())/_controlFrequency;
 
     Vector2d dhdx = 2*robot_to_obs.transpose()*obstacle.inertia_matrix().inverse()*dfdu.block(0,0,2,2) + robot_to_obs.normalized().transpose()*dbdu +  (1/robot_to_obs.norm())*(b_unit.transpose() + b_unit.transpose()*(robot_to_obs*robot_to_obs.transpose()))*dfdu.block(0,0,2,2);  ;                                                      // Should be valid since distance > 0
-    
+    std::cout<<"\n Obstacle Constraints: "<<-dhdx(0)<<" "<<-dhdx(1) <<" "<< distance - _minimumSafeDistance;
     
     
     return { distance - _minimumSafeDistance,
