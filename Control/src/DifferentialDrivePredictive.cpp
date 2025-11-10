@@ -199,11 +199,16 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 unsigned int n = obstacles[j].size();
                 _obstacleConstraintMatrix.resize(n, 2);
                 _obstacleConstraintVector.resize(n);
-                bool use_ellipsoid = true;
+                bool use_ellipsoid = false;
                 for (int k = 0; k < n; ++k)
                 {
                     const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[j][k],use_ellipsoid);
-                  
+                    if(use_ellipsoid)
+                    {
+                        std::cout<<"\n collision with obstacle ";
+                
+                        return Eigen::Vector2d(0.0,0.0);
+                    }
                     _obstacleConstraintVector(k)     = scalar;                  
                     _obstacleConstraintMatrix.row(k) = rowVector;
                 }
@@ -303,7 +308,7 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
 RobotLibrary::Control::BarrierConstraints
 DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
                                                          const RobotLibrary::Model::Obstacle2D &obstacle,
-                                                         bool ellipse)
+                                                         bool &ellipse)
 {
     // b(x_{i+1}) \approx b(x_i) + (db/dx)^T dx, and
     // dx = df/du * du
@@ -315,9 +320,12 @@ DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Mod
     Matrix<double,3,2> dfdu = control_jacobian(pose,_controlFrequency);
     
     double distance = robot_to_obs.transpose()* obstacle.inertia_matrix().inverse() * robot_to_obs   + b_unit.dot(obstacle.point_on_surface(pose.translation())); // Magnitude of the distance
-    std::cout<<"\nEllipse matrix\n" <<  obstacle.inertia_matrix().inverse();
+    //std::cout<<"\nEllipse matrix\n" <<  obstacle.inertia_matrix().inverse();
+    std::cout<<"\n Distance to obstacle at Pose" << pose.translation() <<" = " <<distance;
     if (distance - _minimumSafeDistance< 0.0)
     {
+        ellipse = true;
+
         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] compute_barrier_constraints(): "
                                  "Collision with '" + obstacle.name() + "' obstacle detected.");
     }
