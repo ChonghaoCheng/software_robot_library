@@ -144,6 +144,8 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
     {   
         double largestStepChange = 0.0;                                                             // Store largest step change in control for this recursion
 
+        double potentialDivisor = 1.0 * i + 1;                                                      // Shrinks potential function with each iteration
+        
         Vector3d lagrangeMultipliers;                                                               // This equivalent to a wrench for SE(2)
         
         // Backwards recursions
@@ -165,14 +167,16 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     
                     double distance = r.norm() - _minimumSafeDistance;
                     
+                    /*
                     if (distance <= 0.0)
                     {
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
+                    */
                     
-                    potentialGradient.head(2) += - _obstaclePotentialScalar * r / (distance * distance + 1e-06);
+                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* r / (distance * distance + 1e-08);
                 }
 
                 lagrangeMultipliers = - potentialGradient;                    
@@ -200,18 +204,20 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     
                     double distance = r.norm() - _minimumSafeDistance;
                     
+                    /*
                     if (distance <= 0.0)
                     {
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
+                    */
                     
-                    double distanceSquared = distance * distance + 1e-06;                           // Add a tiny error to prevent large numbers
+                    double distanceSquared = distance * distance + 1e-08;                           // Add a tiny error to prevent large numbers
 
-                    potentialGradient.head(2) += - _obstaclePotentialScalar * r / distanceSquared;
+                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * r / distanceSquared;
                     
-                    potentialHessian.block(0,0,2,2) += ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
+                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
                 }
                 
                 Vector3d temp = potentialGradient - lagrangeMultipliers;
