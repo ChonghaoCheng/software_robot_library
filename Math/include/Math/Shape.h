@@ -45,6 +45,16 @@ class Shape
         virtual
         VectorType
         point_on_surface(const VectorType &referencePoint) const = 0;
+        
+        /**
+         * @brief Get the type of shape.
+         */
+        std::string
+        type() const { return _type; }
+        
+    protected:
+        
+        std::string _type = "unknown";
 };
 
 // Convenience aliases
@@ -54,4 +64,3 @@ using Shape3D = Shape<3>;
 } } // namespace RobotLibrary::Math
 
 #endif
-
