@@ -65,7 +65,7 @@ class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriv
              * @brief Compute the control barrier constraints for an obstacle.
              */
             RobotLibrary::Control::BarrierConstraints
-            compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+            compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
                                         const RobotLibrary::Model::Obstacle2D &obstacle);
 };                                                                                                  // Semicolon needed after class declaration
 
