@@ -42,7 +42,7 @@ class Obstacle2D : public RigidBody2D
         Obstacle2D(std::unique_ptr<Shape2D> shape,
                    const double &mass = 1.0,
                    const double &inertia = 1.0,
-                   const std::string &name = "unnamed");
+                   const std::string &name = "");
 
         /**
          * @brief Get a point on the surface of the obstacle.
