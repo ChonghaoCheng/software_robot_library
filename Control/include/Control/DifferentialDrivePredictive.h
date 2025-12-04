@@ -84,6 +84,8 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
         
         private:
         
+        double _obstaclePotentialScalar = 1e-03;                                                    ///< Determines magnitude of repulsive force
+        
         double _controlBarrierScalar = 5.0;                                                         ///< Scales the control barrier function for obstacle avoidance
         
         double _threshold = 1e-10;                                                                  ///< Terminates algorithm early if this threshold is reached
@@ -109,7 +111,7 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
          * @note This is a virtual method and must be defined in any derived class.
          */
         RobotLibrary::Control::BarrierConstraints
-        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+        compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
                                     const RobotLibrary::Model::Obstacle2D &obstacle);
 };                                                                                                  // Semicolon needed after class declaration
 

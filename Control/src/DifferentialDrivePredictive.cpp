@@ -35,6 +35,7 @@ DifferentialDrivePredictive::DifferentialDrivePredictive(RobotLibrary::Model::Di
                         modelParameters,
                         solverOptions),
  _numberOfRecursions(controlParameters.numberOfRecursions),
+ _obstaclePotentialScalar(controlParameters.obstaclePotentialScalar),
  _predictionSteps(controlParameters.predictionSteps),
  _threshold(controlParameters.maximumControlStepNorm)
 {
@@ -130,119 +131,126 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                     "desired states for the trajectory tracking, but received "
                                     + std::to_string(desiredStates.size()) + ".");
     }
-    else if (obstacles.size() != _predictionSteps)
+    else if (obstacles.size() != _predictionSteps+1)
     {
         throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
-                                    "This controller has N = " + std::to_string(_predictionSteps+1) + " "
+                                    "This controller has N + 1 = " + std::to_string(_predictionSteps+1) + " "
                                     "prediction steps, but the obstacle array had "
                                     + std::to_string(obstacles.size()) + " elements.");
     }
     
     // Run the optimisations
     for (int i = 0; i < _numberOfRecursions; ++i)
-    {
+    {   
         double largestStepChange = 0.0;                                                             // Store largest step change in control for this recursion
 
-        Vector3d costateVector;                                                                     // i.e. Lagrange multipliers
+        Vector3d lagrangeMultipliers;                                                               // This equivalent to a wrench for SE(2)
         
         // Backwards recursions
         for (int j = _predictionSteps; j >= 0; --j)
-        {    
+        {
             if (j == _predictionSteps)
             {
-                costateVector = _poseErrorWeight[j] * _predictedStates[j].pose.error(desiredStates[j].pose);
+                Pose2D currentPose = _predictedStates[j].pose;
+                
+                Vector3d potentialGradient = - _poseErrorWeight[j] * currentPose.error(desiredStates[j].pose); // NOTE: Force is K * e = - dP/dx
+                
+                for (int k = 0; k < obstacles[j].size(); ++k)
+                {
+                    Vector2d currentPosition = currentPose.translation();
+                    
+                    Vector2d nearestPoint = obstacles[j][k].point_on_surface(currentPosition);
+                    
+                    Vector2d r = currentPosition - nearestPoint;
+                    
+                    double distance = r.norm() - _minimumSafeDistance;
+                    
+                    if (distance <= 0.0)
+                    {
+                        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
+                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
+                                                 "with obstacle " + std::to_string(k+1) + ".");
+                    }
+                    
+                    potentialGradient.head(2) += - _obstaclePotentialScalar * r / (distance * distance + 1e-06);
+                }
+
+                lagrangeMultipliers = - potentialGradient;                    
             }
             else
             {
-                // Values used in this scope    
-                double angle             = _predictedStates[j].pose.angle();
-                Matrix3d K               = _poseErrorWeight[j];
-                Matrix2d M               = _controlWeight[j];
-                Pose2D currentPose       = _predictedStates[j].pose;
+                // Variables used in this scope
+                double angle = _predictedStates[j].pose.angle();
+                
+                Pose2D currentPose = _predictedStates[j].pose;
+                Pose2D nextPose    = _predictedStates[j+1].pose;
+                
                 Vector2d currentVelocity = _predictedStates[j].velocity;
-                Vector2d desiredVelocity = desiredStates[j].velocity;
-                Vector3d nextPoseError   = _predictedStates[j+1].pose.error(desiredStates[j].pose);
-                Vector3d errorCorrection = K * nextPoseError + costateVector;
-
-                // Partial derivative of state propagation w.r.t. configuration                                                    
-                Eigen::Matrix<double,3,3> dfdx = configuration_jacobian(currentPose,
-                                                                        currentVelocity,
-                                                                        _controlFrequency);
+                
+                Matrix2d M = _controlWeight[j];
+                
+                Matrix3d potentialHessian = _poseErrorWeight[j];                                    // i.e. stiffness matrix K
+                
+                Vector3d potentialGradient = - potentialHessian * nextPose.error(desiredStates[j+1].pose); // Error at NEXT step, K * e[j+1]
+                
+                // Add up effects from obstacles
+                for (int k = 0; k < obstacles[j+1].size(); ++k)
+                {
+                    Vector2d r = nextPose.translation() - obstacles[j+1][k].point_on_surface(nextPose.translation());
                     
-                // Partial derivative of state propagation w.r.t. control.
-                Eigen::Matrix<double,3,2> dfdu = control_jacobian(currentPose,
-                                                                  _controlFrequency);
+                    double distance = r.norm() - _minimumSafeDistance;
+                    
+                    if (distance <= 0.0)
+                    {
+                        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
+                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
+                                                 "with obstacle " + std::to_string(k+1) + ".");
+                    }
+                    
+                    double distanceSquared = distance * distance + 1e-06;                           // Add a tiny error to prevent large numbers
+
+                    potentialGradient.head(2) += - _obstaclePotentialScalar * r / distanceSquared;
+                    
+                    potentialHessian.block(0,0,2,2) += ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
+                }
+                
+                Vector3d temp = potentialGradient - lagrangeMultipliers;
+                
+                // Partial derivative of kinematics w.r.t configuration x
+                Matrix<double,3,3> dfdx = configuration_jacobian(currentPose, currentVelocity, _controlFrequency);
+                
+                // Partial derivative of kinematics w.r.t. control input u
+                Matrix<double,3,2> dfdu = control_jacobian(currentPose, _controlFrequency);
                 dfdu(2,1) = 1.0; // NOTE: This works better for some reason???
-
-                // Partial derivative of state propagation w.r.t. configuration   
-                Eigen::Vector<double,2> dLdu = - M * (desiredVelocity - currentVelocity)
-                                               - dfdu.transpose() * errorCorrection;
-                                                                      
-                // Second derivative of Lagrangian w.r.t. control (i.e. Hessian)
-                Eigen::Matrix<double,2,2> d2Ldu2 = M + dfdu.transpose() * K * dfdu;
-
-                // Mixed derivatives of Lagrangian 
-                Eigen::Matrix<double,2,3> d2Ldudx = dfdu.transpose() * K * dfdx;
-                d2Ldudx(0,2) += (errorCorrection[0] * sin(angle) - errorCorrection[0] * cos(angle)) / _controlFrequency;
-                                                                           
-                // Set up the constraint for the control input du
-                RobotLibrary::Model::Limits linear, angular;
                 
-                compute_control_limits(linear, angular, currentVelocity);                           // Limits are computed w.r.t. current velocity
+                // Partial derivative of Lagrangian w.r.t. configuration x
+                Vector<double,2> dLdu = - M * (desiredStates[j].velocity - _predictedStates[j].velocity) + dfdu.transpose() * temp;
+              
+                // Mixed partial derivatives of Lagrangian w.r.t. control u, configuration x
+                Matrix<double,2,3> d2Ldudx = dfdu.transpose() * potentialHessian * dfdx;
+                d2Ldudx(0,2) += (temp[0] * sin(angle) - temp[1] * cos(angle)) / _controlFrequency;  // This is d^2f/dudx^T * (dp/dx - lambda[i+1])
+                                           
+                // Second derivative of Lagrangian w.r.t. control u
+                Matrix<double,2,2> d2Ldu2 = M + dfdu.transpose() * potentialHessian * dfdu;
                 
-                _controlConstraintVector << currentVelocity[0] - linear.lower,                      // -dv <= v - v_min
-                                            currentVelocity[1] - angular.lower,                     // -dw <= w - w_min
-                                            linear.upper  - currentVelocity[0],                     //  dv <= v_max - v
-                                            angular.upper - currentVelocity[1];                     //  dw <= w_max - ws
-                
-                // Set up the obstacle constraints
-                unsigned int n = obstacles[i].size();
-                _obstacleConstraintMatrix.resize(n, 2);
-                _obstacleConstraintVector.resize(n);
-                
-                for (int k = 0; k < n; ++k)
-                {
-                    const auto &[scalar, rowVector] = compute_barrier_constraints(currentPose, obstacles[i][k]);
-                  
-                    _obstacleConstraintVector(k)     = scalar;                  
-                    _obstacleConstraintMatrix.row(k) = rowVector;
-                }
-                
-                // Combine the constraints
-                unsigned int numRows = _controlConstraintVector.size() + _obstacleConstraintVector.size();
-                _constraintMatrix.resize(numRows, 2);
-                _constraintMatrix.block(0,0,4,2)         = _controlConstraintMatrix;
-                _constraintMatrix.block(4,0,numRows-4,2) = _obstacleConstraintMatrix;
-                
-                _constraintVector.resize(numRows);
-                _constraintVector.segment(0,4)         = _controlConstraintVector;
-                _constraintVector.segment(4,numRows-4) = _obstacleConstraintVector;
-                
-                // Solve the control
-                Eigen::Vector3d dx = currentPose.error(desiredStates[j].pose);
-                Eigen::Vector2d du = {0.0, 0.0};                                                    // We want to solve for this                                        
-                try
-                {
-                    du = QPSolver<double>::solve(d2Ldu2,
-                                                 dLdu + d2Ldudx * dx,
-                                                 _constraintMatrix,
-                                                 _constraintVector,
-                                                 du);
-                }
-                catch (const std::exception &exception)
-                {
-                    throw std::runtime_error(std::string(exception.what()) + " "
-                                             "Failed on recursion no. " + std::to_string(i) + " "
-                                             "at step no. " + std::to_string(j) + ".");
-                }
+                // Solve for the optimal step size
+                Vector3d dx = currentPose.error(desiredStates[j].pose);
+                Vector2d du = -d2Ldu2.ldlt().solve(dLdu + d2Ldudx * dx);
                 
                 double norm = du.norm();
                 
                 if (norm > largestStepChange) largestStepChange = norm;
                 
-                _predictedStates[j].velocity += du;                                                 // Increment control input
+                _predictedStates[j].velocity += du;
+                
+                // Constrain
+                Limits linear, angular;
+                compute_control_limits(linear, angular, currentVelocity);
+                
+                _predictedStates[j].velocity[0] = std::clamp(_predictedStates[j].velocity[0],  linear.lower,  linear.upper);
+                _predictedStates[j].velocity[1] = std::clamp(_predictedStates[j].velocity[1], angular.lower, angular.upper);
 
-                costateVector = dfdx.transpose() * errorCorrection;
+                lagrangeMultipliers = -potentialGradient + dfdx.transpose() * lagrangeMultipliers;
             }
         }
         
@@ -265,36 +273,6 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
     }
     
     return _predictedStates[0].velocity;                                                            // Only return the 1sts
-}
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
- //                 Compute the constraint barrier vector and scalar for an obstacle               //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-RobotLibrary::Control::BarrierConstraints
-DifferentialDrivePredictive::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
-                                                         const RobotLibrary::Model::Obstacle2D &obstacle)
-{
-    // b(x_{i+1}) \approx b(x_i) + (db/dx)^T dx, and
-    // dx = df/du * du
-    using namespace Eigen;                                                                          // For brevity
-    
-    Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());     //(nearest?) point on surace
-    
-    double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
-
-    if (distance < 0.0)
-    {
-        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] compute_barrier_constraints(): "
-                                 "Collision with '" + obstacle.name() + "' obstacle detected.");
-    }
-    
-    Vector2d dbdx = displacement.normalized();                                                      // Should be valid since distance > 0
-    
-    Vector2d rowVector = { dbdx[0] * cos(pose.angle()),
-                           dbdx[1] * sin(pose.angle()) };
-    
-    return { distance,
-            -rowVector };
 }
 
 } } // namespace
