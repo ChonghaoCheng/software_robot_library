@@ -34,6 +34,8 @@ DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::
   _xPositionGain(controlParameters.xPositionGain),
   _yPositionGain(controlParameters.yPositionGain)
 {
+    _minimumSafeDistance = 0.1; // NEED TO FIX THIS
+    
     if (_xPositionGain   <= 0
     or  _yPositionGain   <= 0
     or  _orientationGain <= 0)
@@ -54,12 +56,15 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
                                             const Eigen::Vector2d &desiredVelocity,
                                             const std::vector<RobotLibrary::Model::Obstacle2D> &obstacles)
 {
+    using namespace Eigen;
+    using namespace RobotLibrary;
+    
     // Kanayama, Y., Kimura, Y., Miyazaki, F., & Noguchi, T. (1990, May).
     // A stable tracking control method for an autonomous mobile robot.
     // In Proceedings., IEEE International Conference on Robotics and Automation (pp. 384-389). IEEE.
     
     // Pose error in the GLOBAL frame
-    Eigen::Vector3d e = _pose.error(desiredPose);
+    Vector3d e = _pose.error(desiredPose);
     
     // Position error in the LOCAL frame
     double epsilon_x =  e[0] * cos(_pose.angle()) + e[1] * sin(_pose.angle());
@@ -70,15 +75,15 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     //  subject to: B * u <= z
     // Hessian H == M, and f == - M * u_d
     
-    Eigen::Matrix2d H;
+    Matrix2d H;
     H << _mass,      0.0,
            0.0, _inertia;
                            
-    Eigen::Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
-                          -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
+    Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
+                   -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
     
     // Compute speed limits
-    RobotLibrary::Model::Limits linear, angular;
+    Model::Limits linear, angular;
     
     compute_control_limits(linear, angular, velocity());
 
@@ -94,7 +99,12 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     
     for (int i = 0; i < n; ++i)
     {
-        const auto &[scalar, rowVector] = compute_barrier_constraints(_pose, obstacles[i]);
+        Model::DifferentialDriveState state;
+        state.pose = _pose;
+        state.velocity[0] = cos(_pose.angle()) * _twist[0] + sin(_pose.angle()) * _twist[1];
+        state.velocity[1] = _twist[2];
+        
+        const auto &[scalar, rowVector] = compute_barrier_constraints(state , obstacles[i]);
         
         _obstacleConstraintMatrix.row(i) = rowVector;
         
@@ -118,12 +128,14 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
  //                 Compute the constraint barrier vector and scalar for an obstacle               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 RobotLibrary::Control::BarrierConstraints
-DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
                                                        const RobotLibrary::Model::Obstacle2D &obstacle)
 {
     using namespace Eigen;                                                                          // For brevity
     
-    Vector2d displacement = pose.translation() - obstacle.point_on_surface(pose.translation());     //(nearest?) point on surace
+    Vector2d robotPosition = state.pose.translation();
+    
+    Vector2d displacement = robotPosition - obstacle.point_on_surface(robotPosition);               //(nearest?) point on surace
     
     double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
 
@@ -133,7 +145,9 @@ DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model
                                  "Collision with '" + obstacle.name() + "' obstacle detected.");
     }
     
-    Vector2d heading(cos(pose.angle()), sin(pose.angle()));                                         // A unit vector
+    double angle = state.pose.angle();
+    
+    Vector2d heading(cos(angle), sin(angle));                                                       // A unit vector
     
     double projection = heading.dot(displacement.normalized());                                     // If > 0, then robot is heading toward obstacle
     
