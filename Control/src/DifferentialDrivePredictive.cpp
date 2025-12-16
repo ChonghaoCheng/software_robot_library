@@ -31,7 +31,6 @@ DifferentialDrivePredictive::DifferentialDrivePredictive(RobotLibrary::Model::Di
                                                          RobotLibrary::Control::DifferentialDrivePredictiveParameters &controlParameters,
                                                          SolverOptions<double> &solverOptions)
 : DifferentialDriveBase(controlParameters.controlFrequency,
-                        controlParameters.minimumSafeDistance,
                         modelParameters,
                         solverOptions),
  _numberOfRecursions(controlParameters.numberOfRecursions),
@@ -167,14 +166,12 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     
                     double distance = r.norm() - _minimumSafeDistance;
                     
-                    /*
                     if (distance <= 0.0)
                     {
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
-                    */
                     
                     potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* r / (distance * distance + 1e-08);
                 }
@@ -200,18 +197,23 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 // Add up effects from obstacles
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
-                    Vector2d r = nextPose.translation() - obstacles[j+1][k].point_on_surface(nextPose.translation());
+                    Vector2d x = nextPose.translation();
+                    Vector2d s = obstacles[j+1][k].point_on_surface(x);
+                    Vector2d r = x - s;
                     
                     double distance = r.norm() - _minimumSafeDistance;
-                    
-                    /*
+
                     if (distance <= 0.0)
                     {
+                        std::cout << "Point on surface: " << s.transpose() << "\n";
+                        std::cout << "Robot position:    " << x.transpose() << "\n";
+                        std::cout << "Minimum safe distance: " << _minimumSafeDistance << "\n";
+                        std::cout << "Distance: " << distance << "\n\n";
+                        
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
-                    */
                     
                     double distanceSquared = distance * distance + 1e-08;                           // Add a tiny error to prevent large numbers
 

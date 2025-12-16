@@ -27,7 +27,6 @@ namespace RobotLibrary { namespace Control {
 DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
                                                      const RobotLibrary::Control::DifferentialDriveFeedbackParameters &controlParameters)
 : DifferentialDriveBase(controlParameters.controlFrequency,
-                        controlParameters.minimumSafeDistance,
                         modelParameters,
                         controlParameters.qpsolver),
   _orientationGain(controlParameters.orientationGain),
