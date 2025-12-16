@@ -84,7 +84,6 @@ struct DifferentialDrivePredictiveParameters
     double controlFrequency         = 100.0;                                                        ///< Rate at which control is calculated / implemented
     double exponent                 = 0.01;                                                         ///< Scales the pose error weight across the horizon
     double maximumControlStepNorm   = 1e-04;                                                        ///< Threshold for terminating optimisation
-    double minimumSafeDistance      = 0.5;                                                          ///< Used in collision avoidance
     double obstaclePotentialScalar  = 1e-03;                                                        ///< Scales the magnitude of the repulsion force
     unsigned int numberOfRecursions = 10;                                                           ///< Number of forward & backward passes to optimise control
     unsigned int predictionSteps    = 50;                                                           ///< Length of prediction horizon
