@@ -22,12 +22,10 @@ namespace RobotLibrary { namespace Control {
  //                                          Constructor                                           //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 DifferentialDriveBase::DifferentialDriveBase(const double &controlFrequency,
-                                             const double &minimumSafeDistance,
                                              const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
                                              const SolverOptions<double> &solverOptions)
 : DifferentialDrive(modelParameters),
   _controlFrequency(controlFrequency),
-  _minimumSafeDistance(minimumSafeDistance),
   QPSolver<double>(solverOptions)
 {
     // Esnure input arguments are sound

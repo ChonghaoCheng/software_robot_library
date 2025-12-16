@@ -30,7 +30,6 @@ class DifferentialDriveBase : public QPSolver<double>,
     public:
     
         DifferentialDriveBase(const double &controlFrequency,
-                              const double &minimumSafeDistance,
                               const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
                               const SolverOptions<double> &solverOptions);
                               
@@ -46,8 +45,6 @@ class DifferentialDriveBase : public QPSolver<double>,
     protected:
 
         double _controlFrequency = 100.0;                                                           ///< Rate at which control commands are sent to robot
-        
-        double _minimumSafeDistance = 0.0;                                                          ///< Extra safety distance used in collision avoidance
 
         Eigen::Matrix<double, Eigen::Dynamic, 2> _constraintMatrix;                                 ///< For the QP solver
         
