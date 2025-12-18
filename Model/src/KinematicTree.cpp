@@ -348,11 +348,20 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
     this->base.update_state(basePose, baseTwist);
     
     // Clear matrices
+    MatrixXd Mqq = MatrixXd::Zero(_numberOfJoints, _numberOfJoints);
+    MatrixXd Mqb = MatrixXd::Zero(_numberOfJoints, 6);
+    MatrixXd Cqq = MatrixXd::Zero(_numberOfJoints, _numberOfJoints);
+    MatrixXd Cqb = MatrixXd::Zero(_numberOfJoints, _numberOfJoints);
+    VectorXd   g = VectorXd::Zero(_numberOfJoints);
+    VectorXd   d = VectorXd::Zero(_numberOfJoints);
+
+/* 
     _jointInertiaMatrix.setZero();
     _jointCoriolisMatrix.setZero();
     _jointGravityVector.setZero();
     _jointBaseInertiaMatrix.setZero();
     _jointBaseCoriolisMatrix.setZero();
+    */
     
     std::deque<Link*> candidateList(_baseLinks.begin(), _baseLinks.end());
     
@@ -377,36 +386,45 @@ KinematicTree::update_state(const Eigen::VectorXd &jointPosition,
         {
             for(int j = i; j < k+1; ++j)
             {
-                _jointInertiaMatrix(i,j) += mass * Jv.col(i).dot(Jv.col(j))+ Jw.col(i).dot(currentLink->inertia() * Jw.col(j));
+                Mqq(i,j) += mass * Jv.col(i).dot(Jv.col(j)) + Jw.col(i).dot(currentLink->inertia() * Jw.col(j));
             }
         }
         
         Eigen::Matrix<double,6,Eigen::Dynamic> Jdot = time_derivative(J);
         
-        _jointCoriolisMatrix.block(0,0,k+1,k+1) += mass * Jv.transpose() * Jdot.block(0,0,3,k+1)
+        Cqq.block(0,0,k+1,k+1) += mass * Jv.transpose() * Jdot.block(0,0,3,k+1)
                                                         + Jw.transpose() * (currentLink->inertia_derivative() * Jw + currentLink->inertia() * Jdot.block(3,0,3,k+1));
         
-        _jointGravityVector.head(k+1) -= mass * Jv.transpose() * _gravityVector;
+        g.head(k+1) -= mass * Jv.transpose() * _gravityVector;
         
-        _jointDampingVector[k] = currentLink->joint().damping() * _jointVelocity[k];
+        d[k] = currentLink->joint().damping() * _jointVelocity[k];
         
         
-        _jointBaseInertiaMatrix.block(0,0,k+1,3) += mass * Jv.transpose();
-        _jointBaseInertiaMatrix.block(0,3,k+1,3) += Jw.transpose() * this->base.inertia()
-                                                  - mass * (SkewSymmetric(currentLink->center_of_mass() - this->base.pose().translation()) * Jv).transpose();
+        Mqb.block(0,0,k+1,3) += mass * Jv.transpose();
+        Mqb.block(0,3,k+1,3) += Jw.transpose() * this->base.inertia()
+                              - mass * (SkewSymmetric(currentLink->center_of_mass() - this->base.pose().translation()) * Jv).transpose();
         
-        _jointBaseCoriolisMatrix.block(0,3,k+1,3) += Jw.transpose() * this->base.inertia_derivative()
-                                                   - mass * (SkewSymmetric(currentLink->twist().head(3)) * Jv).transpose();
+        Cqb.block(0,3,k+1,3) += Jw.transpose() * this->base.inertia_derivative()
+                              - mass * (SkewSymmetric(currentLink->twist().head(3)) * Jv).transpose();
         
         std::vector<Link*> temp = currentLink->child_links();
         
         if(not temp.empty()) candidateList.insert(candidateList.begin(), temp.begin(), temp.end());
     }
     
+    // Complete the second half of the inertia matrix
     for(int i = 1; i < _numberOfJoints; ++i)
     {
-        for(int j = 0; j < i; ++j) _jointInertiaMatrix(i,j) = _jointInertiaMatrix(j,i);
+        for(int j = 0; j < i; ++j) Mqq(i,j) = Mqq(j,i);
     }
+    
+    // Now assign the values
+    _jointInertiaMatrix      = Mqq;
+    _jointBaseInertiaMatrix  = Mqb;
+    _jointCoriolisMatrix     = Cqq;
+    _jointBaseCoriolisMatrix = Cqb;
+    _jointGravityVector      = g;
+    _jointDampingVector      = d;
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -510,16 +528,16 @@ KinematicTree::time_derivative(const Eigen::Matrix<double,6,Eigen::Dynamic> &jac
                     double qdot = _jointVelocity(j);                                                // Makes things a little easier
                     
                     // qdot_j * ( a_j x (a_i x r_i) )
-                    Jdot(0,i) += qdot*(jacobianMatrix(4,j)*jacobianMatrix(2,i) - jacobianMatrix(5,j)*jacobianMatrix(1,i));
-                    Jdot(1,i) += qdot*(jacobianMatrix(5,j)*jacobianMatrix(0,i) - jacobianMatrix(3,j)*jacobianMatrix(2,i));
-                    Jdot(2,i) += qdot*(jacobianMatrix(3,j)*jacobianMatrix(1,i) - jacobianMatrix(4,j)*jacobianMatrix(0,i));
+                    Jdot(0,i) += qdot*(jacobianMatrix(4,j) * jacobianMatrix(2,i) - jacobianMatrix(5,j) * jacobianMatrix(1,i));
+                    Jdot(1,i) += qdot*(jacobianMatrix(5,j) * jacobianMatrix(0,i) - jacobianMatrix(3,j) * jacobianMatrix(2,i));
+                    Jdot(2,i) += qdot*(jacobianMatrix(3,j) * jacobianMatrix(1,i) - jacobianMatrix(4,j) * jacobianMatrix(0,i));
                     
                     if(_link[i]->joint().is_revolute())                                             // J_i = [a_i x r_i; a_i]
                     {
                          // qdot_j * ( a_j x a_i )
-                         Jdot(3,i) += qdot*(jacobianMatrix(4,j)*jacobianMatrix(5,i) - jacobianMatrix(5,j)*jacobianMatrix(4,i));
-                         Jdot(4,i) += qdot*(jacobianMatrix(5,j)*jacobianMatrix(3,i) - jacobianMatrix(3,j)*jacobianMatrix(5,i));
-                         Jdot(5,i) += qdot*(jacobianMatrix(3,j)*jacobianMatrix(4,i) - jacobianMatrix(4,j)*jacobianMatrix(3,i));
+                         Jdot(3,i) += qdot*(jacobianMatrix(4,j) * jacobianMatrix(5,i) - jacobianMatrix(5,j) * jacobianMatrix(4,i));
+                         Jdot(4,i) += qdot*(jacobianMatrix(5,j) * jacobianMatrix(3,i) - jacobianMatrix(3,j) * jacobianMatrix(5,i));
+                         Jdot(5,i) += qdot*(jacobianMatrix(3,j) * jacobianMatrix(4,i) - jacobianMatrix(4,j) * jacobianMatrix(3,i));
                     }     
                }
                
@@ -531,16 +549,16 @@ KinematicTree::time_derivative(const Eigen::Matrix<double,6,Eigen::Dynamic> &jac
                     if(_link[i]->joint().is_revolute())                                             // J_i = [a_i x r_i; a_i]
                     {
                          // qdot_i * ( a_i x (a_j x r_j) )
-                         Jdot(0,j) += qdot*(jacobianMatrix(4,j)*jacobianMatrix(2,i) - jacobianMatrix(5,j)*jacobianMatrix(1,i));
-                         Jdot(1,j) += qdot*(jacobianMatrix(5,j)*jacobianMatrix(0,i) - jacobianMatrix(3,j)*jacobianMatrix(2,i));
-                         Jdot(2,j) += qdot*(jacobianMatrix(3,j)*jacobianMatrix(1,i) - jacobianMatrix(4,j)*jacobianMatrix(0,i));
+                         Jdot(0,j) += qdot*(jacobianMatrix(4,j) * jacobianMatrix(2,i) - jacobianMatrix(5,j) * jacobianMatrix(1,i));
+                         Jdot(1,j) += qdot*(jacobianMatrix(5,j) * jacobianMatrix(0,i) - jacobianMatrix(3,j) * jacobianMatrix(2,i));
+                         Jdot(2,j) += qdot*(jacobianMatrix(3,j) * jacobianMatrix(1,i) - jacobianMatrix(4,j) * jacobianMatrix(0,i));
                     }
                     else // this->link[i]->joint().is_prismatic()                                   // J_i = [a_i ; 0]
                     {
                          // qdot_i * ( a_i x (a_j x r_j) )
-                         Jdot(0,j) += qdot*(jacobianMatrix(1,i)*jacobianMatrix(2,j) - jacobianMatrix(2,i)*jacobianMatrix(1,j));
-                         Jdot(1,j) += qdot*(jacobianMatrix(2,i)*jacobianMatrix(0,j) - jacobianMatrix(0,i)*jacobianMatrix(2,j));
-                         Jdot(2,j) += qdot*(jacobianMatrix(0,i)*jacobianMatrix(1,j) - jacobianMatrix(1,i)*jacobianMatrix(0,j));
+                         Jdot(0,j) += qdot*(jacobianMatrix(1,i) * jacobianMatrix(2,j) - jacobianMatrix(2,i) * jacobianMatrix(1,j));
+                         Jdot(1,j) += qdot*(jacobianMatrix(2,i) * jacobianMatrix(0,j) - jacobianMatrix(0,i) * jacobianMatrix(2,j));
+                         Jdot(2,j) += qdot*(jacobianMatrix(0,i) * jacobianMatrix(1,j) - jacobianMatrix(1,i) * jacobianMatrix(0,j));
                     }
                }
           }
@@ -584,29 +602,29 @@ KinematicTree::partial_derivative(const Eigen::Matrix<double,6,Eigen::Dynamic> &
                     if (j < i)
                     {
                          // a_j x (a_i x a_i)
-                         dJ(0,i) = jacobianMatrix(4,j)*jacobianMatrix(2,i) - jacobianMatrix(5,j)*jacobianMatrix(1,i);
-                         dJ(1,i) = jacobianMatrix(5,j)*jacobianMatrix(0,i) - jacobianMatrix(3,j)*jacobianMatrix(2,i);
-                         dJ(2,i) = jacobianMatrix(3,j)*jacobianMatrix(1,i) - jacobianMatrix(4,j)*jacobianMatrix(0,i);
+                         dJ(0,i) = jacobianMatrix(4,j) * jacobianMatrix(2,i) - jacobianMatrix(5,j) * jacobianMatrix(1,i);
+                         dJ(1,i) = jacobianMatrix(5,j) * jacobianMatrix(0,i) - jacobianMatrix(3,j) * jacobianMatrix(2,i);
+                         dJ(2,i) = jacobianMatrix(3,j) * jacobianMatrix(1,i) - jacobianMatrix(4,j) * jacobianMatrix(0,i);
 
                          // a_j x a_i
-                         dJ(3,i) = jacobianMatrix(4,j)*jacobianMatrix(5,i) - jacobianMatrix(5,j)*jacobianMatrix(4,i);
-                         dJ(4,i) = jacobianMatrix(5,j)*jacobianMatrix(3,i) - jacobianMatrix(3,j)*jacobianMatrix(5,i);
-                         dJ(5,i) = jacobianMatrix(3,j)*jacobianMatrix(4,i) - jacobianMatrix(4,j)*jacobianMatrix(3,i);
+                         dJ(3,i) = jacobianMatrix(4,j) * jacobianMatrix(5,i) - jacobianMatrix(5,j) * jacobianMatrix(4,i);
+                         dJ(4,i) = jacobianMatrix(5,j) * jacobianMatrix(3,i) - jacobianMatrix(3,j) * jacobianMatrix(5,i);
+                         dJ(5,i) = jacobianMatrix(3,j) * jacobianMatrix(4,i) - jacobianMatrix(4,j) * jacobianMatrix(3,i);
                     }
                     else
                     {
                          // a_i x (a_j x a_j)
-                         dJ(0,i) = jacobianMatrix(4,i)*jacobianMatrix(2,j) - jacobianMatrix(5,i)*jacobianMatrix(1,j);
-                         dJ(1,i) = jacobianMatrix(5,i)*jacobianMatrix(0,j) - jacobianMatrix(3,i)*jacobianMatrix(2,j);
-                         dJ(2,i) = jacobianMatrix(3,i)*jacobianMatrix(1,j) - jacobianMatrix(4,i)*jacobianMatrix(0,j);
+                         dJ(0,i) = jacobianMatrix(4,i) * jacobianMatrix(2,j) - jacobianMatrix(5,i) * jacobianMatrix(1,j);
+                         dJ(1,i) = jacobianMatrix(5,i) * jacobianMatrix(0,j) - jacobianMatrix(3,i) * jacobianMatrix(2,j);
+                         dJ(2,i) = jacobianMatrix(3,i) * jacobianMatrix(1,j) - jacobianMatrix(4,i) * jacobianMatrix(0,j);
                     }
                }
                else if(_link[j]->joint().is_prismatic() and j > i)                            // J_j = [a_j ; 0]
                {
                     // a_j x a_i
-                    dJ(0,i) = jacobianMatrix(1,j)*jacobianMatrix(2,i) - jacobianMatrix(2,j)*jacobianMatrix(1,i);
-                    dJ(1,i) = jacobianMatrix(2,j)*jacobianMatrix(0,i) - jacobianMatrix(0,j)*jacobianMatrix(2,i);
-                    dJ(2,i) = jacobianMatrix(0,j)*jacobianMatrix(1,i) - jacobianMatrix(1,j)*jacobianMatrix(0,i);
+                    dJ(0,i) = jacobianMatrix(1,j) * jacobianMatrix(2,i) - jacobianMatrix(2,j) * jacobianMatrix(1,i);
+                    dJ(1,i) = jacobianMatrix(2,j) * jacobianMatrix(0,i) - jacobianMatrix(0,j) * jacobianMatrix(2,i);
+                    dJ(2,i) = jacobianMatrix(0,j) * jacobianMatrix(1,i) - jacobianMatrix(1,j) * jacobianMatrix(0,i);
                }
           }
           else if(_link[i]->joint().is_prismatic()                                            // J_i = [a_i ; 0]
@@ -614,9 +632,9 @@ KinematicTree::partial_derivative(const Eigen::Matrix<double,6,Eigen::Dynamic> &
               and j < i)
           {
                // a_j x a_i
-               dJ(0,i) = jacobianMatrix(4,j)*jacobianMatrix(2,i) - jacobianMatrix(5,j)*jacobianMatrix(1,i);
-               dJ(1,i) = jacobianMatrix(5,j)*jacobianMatrix(0,i) - jacobianMatrix(3,j)*jacobianMatrix(2,i);
-               dJ(2,i) = jacobianMatrix(3,j)*jacobianMatrix(1,i) - jacobianMatrix(4,j)*jacobianMatrix(0,i);
+               dJ(0,i) = jacobianMatrix(4,j) * jacobianMatrix(2,i) - jacobianMatrix(5,j) * jacobianMatrix(1,i);
+               dJ(1,i) = jacobianMatrix(5,j) * jacobianMatrix(0,i) - jacobianMatrix(3,j) * jacobianMatrix(2,i);
+               dJ(2,i) = jacobianMatrix(3,j) * jacobianMatrix(1,i) - jacobianMatrix(4,j) * jacobianMatrix(0,i);
           }
      }
      

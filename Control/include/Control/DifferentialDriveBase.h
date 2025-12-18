@@ -30,7 +30,6 @@ class DifferentialDriveBase : public QPSolver<double>,
     public:
     
         DifferentialDriveBase(const double &controlFrequency,
-                              const double &minimumSafeDistance,
                               const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
                               const SolverOptions<double> &solverOptions);
                               
@@ -46,8 +45,6 @@ class DifferentialDriveBase : public QPSolver<double>,
     protected:
 
         double _controlFrequency = 100.0;                                                           ///< Rate at which control commands are sent to robot
-        
-        double _minimumSafeDistance = 0.0;                                                          ///< Extra safety distance used in collision avoidance
 
         Eigen::Matrix<double, Eigen::Dynamic, 2> _constraintMatrix;                                 ///< For the QP solver
         
@@ -70,18 +67,6 @@ class DifferentialDriveBase : public QPSolver<double>,
         compute_control_limits(RobotLibrary::Model::Limits &linear,
                                RobotLibrary::Model::Limits &angular,
                                const Eigen::Vector2d &currentVelocity);
-                               
-        /**
-         * @brief Compute the components needed to insert a CBF in to a QP solver.
-         * @param pose The position and orientation of the robot for which to compute the CBF.
-         * @param obstacle I think it's obvious.
-         * @return A struct containing a row vector and a scalar.
-         * @note This is a virtual method and must be defined in any derived class.
-         */
-        virtual
-        RobotLibrary::Control::BarrierConstraints
-        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
-                                    const RobotLibrary::Model::Obstacle2D &obstacle) = 0;
 };
  
 } } // namespace

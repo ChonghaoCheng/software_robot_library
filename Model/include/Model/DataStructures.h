@@ -69,6 +69,12 @@ struct DifferentialDriveState
     Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity();                                       ///< Uncertainty of the pose
     Eigen::Vector2d velocity = {0.0, 0.0};                                                          ///< Linear & angular velocity, respectively
     RobotLibrary::Model::Pose2D pose;                                                               ///< Position & orientation relative to a reference frame.
+
+    DifferentialDriveState() = default;
+
+    DifferentialDriveState(const RobotLibrary::Model::Pose2D& p,
+                           const Eigen::Vector2d& v)
+        : pose(p), velocity(v) {}
 };
 
 } } // namespace

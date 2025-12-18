@@ -85,7 +85,7 @@ SerialLinkKinematic::resolve_endpoint_motion(const Eigen::Vector<double,6> &endp
         lowerBound[i] = lower;
         upperBound[i] = upper;
 
-        startPoint[i] = std::clamp(startPoint[i], lower + 1e-03, upper - 1e-03);                    // Ensure within bounds of QP solver might fail
+        startPoint[i] = std::clamp(startPoint[i], lower + 1e-06, upper - 1e-06);                    // Ensure within bounds of QP solver might fail
     }
 
     // Compute manipulability gradient once and update constraints
@@ -93,7 +93,8 @@ SerialLinkKinematic::resolve_endpoint_motion(const Eigen::Vector<double,6> &endp
     _constraintMatrix.row(2 * numJoints)            = -manipulabilityGradient.transpose();          // Part of the control barrier function
     _constraintVector.head(numJoints)               = upperBound;
     _constraintVector.segment(numJoints, numJoints) = -lowerBound;
-    _constraintVector(2 * numJoints)                = (_manipulability - _minManipulability) * _controlFrequency;
+    
+    _constraintVector(2 * numJoints)                = 1.0 * (_manipulability - _minManipulability);
 
     VectorXd controlVelocity = VectorXd::Zero(numJoints);                                           // We need to compute this
 
@@ -129,6 +130,10 @@ SerialLinkKinematic::resolve_endpoint_motion(const Eigen::Vector<double,6> &endp
             //             B*x < z
 
             // See: github.com/Woolfrey/software_simple_qp
+            
+            MatrixXd M = _model->joint_inertia_matrix();
+            
+            for (int i = 0; i < numJoints; ++i) M(i,i) += 1e-04;                                    // Add a tiny bit to avoid singularity
             
             controlVelocity = QPSolver<double>::constrained_least_squares(
                 _redundantTask,                                                                     // x_d
@@ -219,18 +224,20 @@ SerialLinkKinematic::compute_control_limits(const unsigned int &jointNumber)
 	RobotLibrary::Model::Limits limits;                                                             // Value to be returned
 
 	double delta = _model->joint_positions()[jointNumber]
-	             - _model->link(jointNumber)->joint().position_limits().lower;                      // Distance from lower limit
+	             - _model->link(jointNumber)->joint().position_limits().lower + 1e-03;              // Distance from lower limit
 	
-	limits.lower = std::max(-delta*_controlFrequency,
+	limits.lower = std::max(-delta * _controlFrequency,
 	               std::max(-_model->link(jointNumber)->joint().speed_limit(),
-	                        -2*sqrt(_maxJointAcceleration*delta)));
-	                        
-	delta = _model->link(jointNumber)->joint().position_limits().upper
+	                        -2 * sqrt(_maxJointAcceleration*delta)));
+               
+	delta = _model->link(jointNumber)->joint().position_limits().upper - 1e-03
 	      - _model->joint_positions()[jointNumber];                                                 // Distance to upper limit
 	
-	limits.upper = std::min(delta*_controlFrequency,
+	limits.upper = std::min(delta * _controlFrequency,
 	               std::min(_model->link(jointNumber)->joint().speed_limit(),
-	                        2*sqrt(_maxJointAcceleration*delta)));
+	                        2 * sqrt(_maxJointAcceleration*delta)));
+	
+	limits.upper -= 1e-03;                                                                          // Slightly lower
 	                        
 	if(limits.lower > limits.upper)
 	{
