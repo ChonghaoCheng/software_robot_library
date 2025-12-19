@@ -45,13 +45,6 @@ class Shape
         virtual
         VectorType
         point_on_surface(const VectorType &referencePoint) const = 0;
-<<<<<<< HEAD
-
-        virtual
-        Eigen::Matrix2d
-        get_shape_matrix() const = 0;
-
-=======
         
         /**
          * @brief Get the type of shape.
@@ -62,7 +55,6 @@ class Shape
     protected:
         
         std::string _type = "unknown";
->>>>>>> upstream/mobile
 };
 
 // Convenience aliases

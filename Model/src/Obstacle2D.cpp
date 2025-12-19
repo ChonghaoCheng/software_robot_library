@@ -32,7 +32,6 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
     // Worker bees can leave.
     // Even drones can fly away.
     // The Queen is their slave.
-    _inertiaMatrix = _shape->get_shape_matrix();
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////

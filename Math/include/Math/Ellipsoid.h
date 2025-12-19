@@ -53,8 +53,6 @@ class Ellipsoid : public Shape<Dim>
         Eigen::Vector<double,Dim>
         point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const override;
 
-        Eigen::Matrix<double, Dim, Dim>
-        get_shape_matrix() const override;
 
     private:
         

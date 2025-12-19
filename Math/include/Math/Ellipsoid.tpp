@@ -46,9 +46,5 @@ Ellipsoid<Dim>::point_on_surface(const Eigen::Vector<double,Dim> &referencePoint
     return referencePoint / sqrt(referencePoint.dot(_LLT.solve(referencePoint)));
 }
 
-template <unsigned int Dim>
-Eigen::Matrix<double, Dim, Dim> Ellipsoid<Dim>::get_shape_matrix()  const
-{
-    return _shapeMatrix;
-} 
+
 }} // namespace
