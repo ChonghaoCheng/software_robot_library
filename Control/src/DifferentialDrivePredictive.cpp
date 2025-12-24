@@ -161,13 +161,23 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     Vector2d currentPosition = currentPose.translation();
                     
                     Vector2d nearestPoint = obstacles[j][k].point_on_surface(currentPosition);
+
+                    Vector2d obsCentre  = obstacles[j][k].pose().translation();
+
+                    Vector2d robotCentre = obsCentre - currentPosition;
+
+                    Vector2d nearestCentre = obsCentre-nearestPoint;
                     
                     Vector2d r = currentPosition - nearestPoint;
-                    
-                    double distance = r.norm() - _minimumSafeDistance;
+
+                    double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
+                    double distance = vectorDir*(r.norm() - _minimumSafeDistance);
                     
                     if (distance <= 0.0)
                     {
+
+                        std::cout << "Point on surface: " << nearestPoint.transpose() << "\n";
+                        std::cout << "Robot position:    " << currentPosition.transpose() << "\n";
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
@@ -199,9 +209,16 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 {
                     Vector2d x = nextPose.translation();
                     Vector2d s = obstacles[j+1][k].point_on_surface(x);
+
+                    Vector2d obsCentre  = obstacles[j][k].pose().translation();
+
+                    Vector2d robotCentre = obsCentre - x;
+
+                    Vector2d nearestCentre = obsCentre - s;
                     Vector2d r = x - s;
                     
-                    double distance = r.norm() - _minimumSafeDistance;
+                    double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
+                    double distance = vectorDir*(r.norm() - _minimumSafeDistance);
 
                     if (distance <= 0.0)
                     {
