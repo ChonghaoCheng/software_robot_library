@@ -160,7 +160,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 {
                     Vector2d currentPosition = currentPose.translation();
                     
-                    Vector2d nearestPoint = obstacles[j][k].point_on_surface(currentPosition);
+                    Vector2d nearestPoint = obstacles[j][k].pose().translation() + obstacles[j][k].point_on_surface(currentPosition);
 
                     Vector2d obsCentre  = obstacles[j][k].pose().translation();
 
@@ -208,7 +208,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
                     Vector2d x = nextPose.translation();
-                    Vector2d s = obstacles[j+1][k].point_on_surface(x);
+                    Vector2d s = obstacles[j][k].pose().translation() + obstacles[j+1][k].point_on_surface(x);
 
                     Vector2d obsCentre  = obstacles[j][k].pose().translation();
 
