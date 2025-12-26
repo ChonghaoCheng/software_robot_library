@@ -30,7 +30,9 @@ DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriv
   _maxLinearAcceleration(parameters.maxLinearAcceleration),
   _maxLinearVelocity(parameters.maxLinearVelocity),
   _minimumSafeDistance(parameters.minimumSafeDistance),
-  _propagationUncertainty(parameters.propagationUncertainty)
+  _propagationUncertainty(parameters.propagationUncertainty),
+  _robotRadii(parameters.robotRadii),
+  _robotLengths(parameters.robotLengths)
 {
     if (_mass <= 0 or _inertia <= 0)
     {

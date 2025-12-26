@@ -158,32 +158,39 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 
                 for (int k = 0; k < obstacles[j].size(); ++k)
                 {
-                    Vector2d currentPosition = currentPose.translation();
-                    
-                    Vector2d nearestPoint = obstacles[j][k].pose().translation() + obstacles[j][k].point_on_surface(currentPosition);
+                    for (int m = 0; m<3 ; m++)
+                    {    
+                        Eigen::Vector2d robotCircleTranslation  = {_robotLengths(m), 0};
 
-                    Vector2d obsCentre  = obstacles[j][k].pose().translation();
+                        Vector2d currentPosition = currentPose * robotCircleTranslation ;
+                        
+                        Vector2d nearestPoint = obstacles[j][k].pose().translation() + obstacles[j][k].point_on_surface(currentPosition);
 
-                    Vector2d robotCentre = obsCentre - currentPosition;
+                        Vector2d obsCentre  = obstacles[j][k].pose().translation();
 
-                    Vector2d nearestCentre = obsCentre-nearestPoint;
-                    
-                    Vector2d r = currentPosition - nearestPoint;
+                        Vector2d robotCentre = obsCentre - currentPosition;
 
-                    double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
-                    double distance = vectorDir*(r.norm() - _minimumSafeDistance);
-                    
-                    if (distance <= 0.0)
-                    {
+                        Vector2d nearestCentre = obsCentre-nearestPoint;
+                        
+                        Vector2d r = currentPosition - nearestPoint;
 
-                        std::cout << "Point on surface: " << nearestPoint.transpose() << "\n";
-                        std::cout << "Robot position:    " << currentPosition.transpose() << "\n";
-                        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
-                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
-                                                 "with obstacle " + std::to_string(k+1) + ".");
-                    }
-                    
-                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* r / (distance * distance + 1e-08);
+                        double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
+                        
+                        double distance = vectorDir*(r.norm() - _minimumSafeDistance - _robotRadii(m));
+                        
+                        if (distance <= 0.0)
+                        {
+
+                            std::cout << "Point on surface: " << nearestPoint.transpose() << "\n";
+                            std::cout << "Robot position:    " << currentPosition.transpose() << "\n";
+                            throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
+                                                    "Collision detected on prediction step " + std::to_string(j+1) + " "
+                                                    "with obstacle " + std::to_string(k+1) + ".");
+                        }
+                        
+                        potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* r / (distance * distance + 1e-08);
+                
+                    }    
                 }
 
                 lagrangeMultipliers = - potentialGradient;                    
@@ -207,38 +214,43 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 // Add up effects from obstacles
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
-                    Vector2d x = nextPose.translation();
-                    Vector2d s = obstacles[j][k].pose().translation() + obstacles[j+1][k].point_on_surface(x);
+                    for (int m = 0; m<3 ; m++)
+                    {    
+                        Eigen::Vector2d robotCircleTranslation  = {_robotLengths(m), 0};
 
-                    Vector2d obsCentre  = obstacles[j][k].pose().translation();
+                        Vector2d x = nextPose * robotCircleTranslation;
+                        Vector2d s = obstacles[j][k].pose().translation() + obstacles[j+1][k].point_on_surface(x);
 
-                    Vector2d robotCentre = obsCentre - x;
+                        Vector2d obsCentre  = obstacles[j][k].pose().translation();
 
-                    Vector2d nearestCentre = obsCentre - s;
-                    Vector2d r = x - s;
-                    
-                    double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
-                    double distance = vectorDir*(r.norm() - _minimumSafeDistance);
+                        Vector2d robotCentre = obsCentre - x;
 
-                    if (distance <= 0.0)
-                    {
-                        std::cout << "Point on surface: " << s.transpose() << "\n";
-                        std::cout << "Robot position:    " << x.transpose() << "\n";
-                        std::cout << "Minimum safe distance: " << _minimumSafeDistance << "\n";
-                        std::cout << "Distance: " << distance << "\n\n";
+                        Vector2d nearestCentre = obsCentre - s;
+                        Vector2d r = x - s;
                         
-                        throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
-                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
-                                                 "with obstacle " + std::to_string(k+1) + ".");
-                    }
-                    
-                    double distanceSquared = distance * distance + 1e-08;                           // Add a tiny error to prevent large numbers
+                        double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
+                        double distance = vectorDir*(r.norm() - _minimumSafeDistance - _robotRadii(m));
 
-                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * r / distanceSquared;
-                    
-                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
-                }
+                        if (distance <= 0.0)
+                        {
+                            std::cout << "Point on surface: " << s.transpose() << "\n";
+                            std::cout << "Robot position:    " << x.transpose() << "\n";
+                            std::cout << "Minimum safe distance: " << _minimumSafeDistance << "\n";
+                            std::cout << "Distance: " << distance << "\n\n";
+                            
+                            throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
+                                                    "Collision detected on prediction step " + std::to_string(j+1) + " "
+                                                    "with obstacle " + std::to_string(k+1) + ".");
+                        }
+                        
+                        double distanceSquared = distance * distance + 1e-08;                           // Add a tiny error to prevent large numbers
+
+                        potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * r / distanceSquared;
+                        
+                        potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
                 
+                    }
+                }
                 Vector3d temp = potentialGradient - lagrangeMultipliers;
                 
                 // Partial derivative of kinematics w.r.t configuration x
