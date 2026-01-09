@@ -4,6 +4,7 @@
 add_library(Control src/DifferentialDriveBase.cpp
                     src/DifferentialDriveFeedback.cpp
                     src/DifferentialDrivePredictive.cpp
+                    src/DDPThreeCircleFootprint.cpp
                     src/SerialLinkBase.cpp
                     src/SerialLinkImpedance.cpp
                     src/SerialLinkKinematic.cpp
