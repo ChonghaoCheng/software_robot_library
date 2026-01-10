@@ -154,11 +154,18 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 {
                     Vector2d currentPosition = currentPose.translation();                           // For brevity
                     
-                    Vector2d pointOnSurface = obstacles[j][k].point_on_surface(currentPosition);    // This is not necessarily the closest point
+                    Vector2d pointOnSurface = obstacles[j][k].pose().translation() + obstacles[j][k].point_on_surface(currentPosition);    // This is not necessarily the closest point
                     
                     Vector2d translation = currentPosition - pointOnSurface;                        // Translation FROM the surface TO the robot
                     
-                    double distance = translation.norm() - _minimumSafeDistance;                    // Store this so we can use it later
+                    Vector2d robotToCentre = obstacles[j][k].pose().translation() - currentPosition; // Distance from robot to obstacle centre
+
+                    Vector2d pointToCentre = obstacles[j][k].pose().translation() - pointOnSurface; //Distance of Surface point to obstacle surface
+                    
+                    double vectorDir = robotToCentre.norm() - pointToCentre.norm()>0 ? 1.0 :-1.0;
+
+                    
+                    double distance = vectorDir*(translation.norm() - _minimumSafeDistance);                    // Store this so we can use it later
                                
                     if (distance <= 0.0)
                     {
@@ -201,12 +208,15 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
                     Vector2d robotPosition     = nextPose.translation();
-                    Vector2d pointOnSurface    = obstacles[j+1][k].point_on_surface(robotPosition);
+                    Vector2d pointOnSurface    =  obstacles[j][k].pose().translation() + obstacles[j+1][k].point_on_surface(robotPosition);
                     Vector2d translationVector = robotPosition - pointOnSurface;
+                    Vector2d pointToCentre = obstacles[j][k].pose().translation() - pointOnSurface;
+                    Vector2d robotToCentre = obstacles[j][k].pose().translation() - robotPosition;
+                    double vectorDir = robotToCentre.norm() - pointToCentre.norm()>0 ? 1.0 :-1.0;
                     
                     _unitVector[k] = translationVector.normalized();
                     
-                    _distanceToObstacle[k] = translationVector.norm() - _minimumSafeDistance;
+                    _distanceToObstacle[k] = vectorDir *(translationVector.norm() - _minimumSafeDistance);
 
                     if (_distanceToObstacle[k] <= 0.0)
                     {                       

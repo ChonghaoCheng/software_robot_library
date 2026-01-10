@@ -178,7 +178,7 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
 
                         Vector2d robotCentre = obsCentre - currentPosition;
 
-                        Vector2d nearestCentre = obsCentre-nearestPoint;
+                        Vector2d nearestCentre = obsCentre - nearestPoint;
                         
                         Vector2d r = currentPosition - nearestPoint;
 
