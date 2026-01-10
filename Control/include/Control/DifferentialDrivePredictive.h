@@ -96,28 +96,16 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
        
         Eigen::Matrix3d _finalPoseErrorWeight;                                                      ///< Weighting matrix on the final pose error
  
+        std::vector<double> _distanceToObstacle;                                                    ///< Kind of obvious.
+        
         std::vector<Eigen::Matrix3d> _poseErrorWeight;                                              ///< Weighting matrix on the intermediate pose error
         
         std::vector<Eigen::Matrix2d> _controlWeight;                                                ///< Weighting on the intermediate control
   
+        std::vector<Eigen::Vector2d> _unitVector;
+  
         std::vector<RobotLibrary::Model::DifferentialDriveState> _predictedStates;                  ///< Pose, velocity, and covariance over the prediction horizon
 
-        /**
-         * @brief Compute the components needed to insert a CBF in to a QP solver.
-         * @note This overrides the virtual method in the base class.
-         * @param pose The position and orientation of the robot for which to compute the CBF.
-         * @param obstacle I think it's obvious.
-         * @return A struct containing a row vector and a scalar.
-         * @note This is a virtual method and must be defined in any derived class.
-         */
-        RobotLibrary::Control::BarrierConstraints
-        compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
-                                    const RobotLibrary::Model::Obstacle2D &obstacle);
-        
-        RobotLibrary::Control::BarrierConstraints
-        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
-                                                                    const RobotLibrary::Model::Obstacle2D &obstacle,
-                                                                    bool &ellipse);
 };                                                                                                  // Semicolon needed after class declaration
 
 } } // Namespace                                                                                      
