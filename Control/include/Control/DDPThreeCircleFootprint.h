@@ -2,7 +2,7 @@
  * @file    DDPThreeCircleFootprint.h
  * @author  Jon Woolfrey & Vignesh Sushrutha Raghavan
  * @email   jonathan.woolfrey@gmail.com
- * @date    May 2025
+ * @date    January 2026
  * @version 1.0
  * @brief   A class that performs model predictive control for a differential drive robot represented by an apprximate ellipsoid.
  *
@@ -99,11 +99,15 @@ class DDPThreeCircleFootprint : public RobotLibrary::Control::DifferentialDriveB
        
         Eigen::Matrix3d _finalPoseErrorWeight;                                                      ///< Weighting matrix on the final pose error
  
+        std::vector<double> _distanceToObstacle;                                                    ///< Kind of obvious.
+        
         std::vector<Eigen::Matrix3d> _poseErrorWeight;                                              ///< Weighting matrix on the intermediate pose error
         
         std::vector<Eigen::Matrix2d> _controlWeight;                                                ///< Weighting on the intermediate control
   
         std::vector<RobotLibrary::Model::DifferentialDriveState> _predictedStates;                  ///< Pose, velocity, and covariance over the prediction horizon
+
+        std::vector<Eigen::Vector2d> _unitVector;
 
         /**
          * @brief Compute the components needed to insert a CBF in to a QP solver.

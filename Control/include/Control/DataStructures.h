@@ -112,8 +112,6 @@ struct DDPThreeCircleFootprintParameters
     = (Eigen::MatrixXd(3,3) << 200.0,   0.00,  0.00,
                                  0.0, 200.00, -0.09, 
                                  0.0,  -0.09,  0.10).finished();
-    Eigen::Vector3d robotLengths = {-0.2,0.0,0.2};
-    Eigen::Vector3d robotRadii = {0.2,0.3,0.2};
 };
 
 

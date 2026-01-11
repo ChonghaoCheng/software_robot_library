@@ -158,6 +158,7 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                 
                 Vector3d potentialGradient = - _poseErrorWeight[j] * currentPose.error(desiredStates[j].pose); // NOTE: Force is K * e = - dP/dx
                 
+                _distanceToObstacle.resize(obstacles[j].size());                                    // Store closest distance to every obstacle
                 for (int k = 0; k < obstacles[j].size(); ++k)
                 {
 
@@ -195,6 +196,7 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                     
                     Eigen::Vector2d nearestPoint = nearest_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
                     double distance = *std::min_element(distances.begin(),distances.end());
+
                     if (distance <= 0.0)
                     {
 
@@ -209,7 +211,6 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
             
                         
                 }
-
                 lagrangeMultipliers = - potentialGradient;                    
             }
             else
@@ -231,9 +232,12 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                 // Add up effects from obstacles
                 std::vector<double> distances(3,0.0);
                 std::vector<Eigen::Vector2d> r_vecs;
+
+                _distanceToObstacle.resize(obstacles[j+1].size()); 
+                _unitVector.resize(obstacles[j+1].size());
+                // Store distance to every obstacle
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
-
                     std::vector<double> distances(3,0.0);
                     std::vector<Eigen::Vector2d> r_vecs;
                     std::vector<Eigen::Vector2d> x_vecs;
@@ -261,26 +265,28 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                         double distance = vectorDir*(r.norm() - _minimumSafeDistance - _robotRadii(m));
                         distances[m] = distance;
                     }
-                    
+
                     Eigen::Vector2d r = r_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
                     Eigen::Vector2d x = x_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
                     Eigen::Vector2d s = s_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
-                   
-                    double distance = *std::min_element(distances.begin(),distances.end());
+                    
+                    _unitVector[k]  = r.normalized();
 
-                    if (distance <= 0.0)
+                    _distanceToObstacle[k] = *std::min_element(distances.begin(),distances.end());
+
+                    if (_distanceToObstacle[k] <= 0.0)
                     {
                         std::cout << "Point on surface: " << s.transpose() << "\n";
                         std::cout << "Robot position:    " << x.transpose() << "\n";
                         std::cout << "Minimum safe distance: " << _minimumSafeDistance << "\n";
-                        std::cout << "Distance: " << distance << "\n\n";
+                        std::cout << "Distance: " << _distanceToObstacle[k] << "\n\n";
                         
                         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] track_trajectory(): "
                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                 "with obstacle " + std::to_string(k+1) + ".");
                     }
                     
-                    double distanceSquared = distance * distance + 1e-08;                           // Add a tiny error to prevent large numbers
+                    double distanceSquared = _distanceToObstacle[k] * _distanceToObstacle[k] + 1e-08;                           // Add a tiny error to prevent large numbers
 
                     potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * r / distanceSquared;
                     
@@ -311,8 +317,20 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                 Vector3d dx = currentPose.error(desiredStates[j].pose);
                 Vector2d du = -d2Ldu2.ldlt().solve(dLdu + d2Ldudx * dx);
                 
-                double norm = du.norm();
+                // Scale du so we do not violate any boundaries
+                Vector2d blah = (dfdu * du).head(2);                                                // Change in configuration due to change in control
                 
+                double alpha = 1.0;
+                
+                for (int k = 0; k < obstacles[j].size(); ++k)
+                { 
+                    double ratio = _distanceToObstacle[k] / blah.dot(_unitVector[k]);
+                    
+                    if (ratio > 0.0 and ratio < alpha) alpha = 0.99 * ratio;
+                }
+                
+                double norm = alpha * du.norm();
+                                
                 if (norm > largestStepChange) largestStepChange = norm;
                 
                 _predictedStates[j].velocity += du;

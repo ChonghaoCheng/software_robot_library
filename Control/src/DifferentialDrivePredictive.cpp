@@ -165,7 +165,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     double vectorDir = robotToCentre.norm() - pointToCentre.norm()>0 ? 1.0 :-1.0;
 
                     
-                    double distance = vectorDir*(translation.norm() - _minimumSafeDistance);                    // Store this so we can use it later
+                    double distance = vectorDir * (translation.norm() - _minimumSafeDistance);                    // Store this so we can use it later
                                
                     if (distance <= 0.0)
                     {
@@ -203,8 +203,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 _unitVector.resize(obstacles[j+1].size());
                 
                 // Add up effects from obstacles
-                std::vector<double> distances(3,0.0);
-                std::vector<Eigen::Vector2d> r_vecs;
+
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
                 {
                     Vector2d robotPosition     = nextPose.translation();
