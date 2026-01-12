@@ -44,51 +44,43 @@ DDPThreeCircleFootprint::DDPThreeCircleFootprint(RobotLibrary::Model::Differenti
     std::string message;
     if (not RobotLibrary::Math::is_positive_definite(controlParameters.poseErrorWeight, message))
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE MPC] Constructor: "
+        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] Constructor: "
                                     "Initial pose error weight matrix is not positive definite: " + message);
     }
     
-    // Set size of vectors
-    _predictedStates.resize(_predictionSteps + 1);                                                  // 1 for current state + N for predicted states
-    _poseErrorWeight.resize(_predictionSteps);
-    _controlWeight.resize(_predictionSteps);
-
-    // Pose Error Weights (Normalized Exponential)
-    double exponent = controlParameters.exponent;
-
-    // Precompute denominator for normalization
-    double denominator = 0.0;
-    for (int j = 0; j < _predictionSteps; ++j)
+    // Check that the exponent is positive
+    if (controlParameters.exponent <= 0.0)
     {
-        denominator += std::exp(exponent * j);
+        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE PREDICTIVE] Constructor: "
+                                    "Exponent must be positive but received " + std::to_string(controlParameters.exponent) + ".");
     }
-
-    // Assign normalized exponential pose weights
-    for (int j = 0; j < _predictionSteps; ++j)
+ 
+    // Resize vectors based on prediction horizon
+    int N = _predictionSteps;
+    _predictedStates.resize(N+1);
+    _poseErrorWeight.resize(N);
+    _controlWeight.resize(N);
+    
+    // Generate gain matrices so that M[N-1] == M, and K[N-1] = K
+    double a = controlParameters.exponent;
+        
+    for (int i = 0; i <= N; ++i)
     {
-        double scalar = std::exp(exponent * j) / denominator;
-        _poseErrorWeight[j] = scalar * controlParameters.poseErrorWeight;
+        double s = (1.0 / N) + (1.0 - (1.0 / N)) * (1.0 - std::exp(-a * (i / (N - 1.0)))) / (1.0 - std::exp(-a));
+        
+        // double s = (1.0 / N) + (1.0 - (1.0 / N)) * (std::exp((a * i)/(N - 1.0)) - 1.0) / (std::exp(a) - 1.0);
+        
+        if (i < N)
+        {
+            _poseErrorWeight[i] = s * controlParameters.poseErrorWeight;
+              _controlWeight[i] = s * _inertiaMatrix;
+        }
+        else
+        {
+            _finalPoseErrorWeight = s * controlParameters.poseErrorWeight;
+        }
     }
-
-    std::vector<double> expWeights(_predictionSteps);
-
-    // Compute exponential profile
-    for (int i = 0; i < _predictionSteps; ++i)
-    {
-        expWeights[i] = std::exp(exponent * i);
-    }
-
-    // Anchor at R_0 = M or R_{N-1} = M depending on direction of growth
-    double scale = (exponent >= 0.0)
-                 ? 1.0 / expWeights.back()   // Ensure R_{N-1} = M
-                 : 1.0 / expWeights.front(); // Ensure R_0 = M
-
-    // Assign scaled control effort weights
-    for (int i = 0; i < _predictionSteps; ++i)
-    {
-        double weight = expWeights[i] * scale;
-        _controlWeight[i] = weight * _inertiaMatrix;
-    }                                                 
+                                       
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -192,7 +184,7 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                         distances[m] = distance;
                     }
 
-                    Eigen::Vector2d r = r_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
+                    Eigen::Vector2d translationVector = r_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
                     
                     Eigen::Vector2d nearestPoint = nearest_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
                     double distance = *std::min_element(distances.begin(),distances.end());
@@ -207,7 +199,7 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                                                 "with obstacle " + std::to_string(k+1) + ".");
                     }
                     
-                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* r / (distance * distance + 1e-08);
+                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor)* translationVector / (distance * distance + 1e-08);
             
                         
                 }
@@ -248,36 +240,36 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                     {    
                         Eigen::Vector2d robotCircleTranslation  = {_robotLengths(m), 0};
 
-                        Vector2d x = nextPose * robotCircleTranslation;
-                        x_vecs.push_back(x);
+                        Vector2d robotCentreTranslation = nextPose * robotCircleTranslation;
+                        x_vecs.push_back(robotCentreTranslation);
 
-                        Vector2d s = obstacles[j+1][k].pose().translation() + obstacles[j+1][k].point_on_surface(x);
-                        s_vecs.push_back(s);
+                        Vector2d pointOnObstacle = obstacles[j+1][k].pose().translation() + obstacles[j+1][k].point_on_surface(robotCentreTranslation);
+                        s_vecs.push_back(pointOnObstacle);
                         Vector2d obsCentre  = obstacles[j+1][k].pose().translation();
 
-                        Vector2d robotCentre = obsCentre - x;
+                        Vector2d robotToCentre = obsCentre - robotCentreTranslation;
 
-                        Vector2d nearestCentre = obsCentre - s;
-                        Vector2d r = x - s;
+                        Vector2d nearestToCentre = obsCentre - pointOnObstacle;
+                        Vector2d r = robotCentreTranslation - pointOnObstacle;
                         r_vecs.push_back(r);
                         
-                        double vectorDir = robotCentre.norm()- nearestCentre.norm()>0 ? 1.0 :-1.0;
+                        double vectorDir = robotToCentre.norm()- nearestToCentre.norm()>0 ? 1.0 :-1.0;
                         double distance = vectorDir*(r.norm() - _minimumSafeDistance - _robotRadii(m));
                         distances[m] = distance;
                     }
 
-                    Eigen::Vector2d r = r_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
-                    Eigen::Vector2d x = x_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
-                    Eigen::Vector2d s = s_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))];
+                    Eigen::Vector2d translationVector = r_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))]; 
+                    Eigen::Vector2d robotCentreTranslation = x_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))]; // Pose of the circle closest to the obstacle
+                    Eigen::Vector2d pointOnObstacle = s_vecs[std::distance(distances.begin(), std::min_element(distances.begin(),distances.end()))]; // Potentially the point on obstacle closest to the robot
                     
-                    _unitVector[k]  = r.normalized();
+                    _unitVector[k]  = translationVector.normalized();
 
                     _distanceToObstacle[k] = *std::min_element(distances.begin(),distances.end());
 
                     if (_distanceToObstacle[k] <= 0.0)
                     {
-                        std::cout << "Point on surface: " << s.transpose() << "\n";
-                        std::cout << "Robot position:    " << x.transpose() << "\n";
+                        std::cout << "Point on surface: " << pointOnObstacle.transpose() << "\n";
+                        std::cout << "Robot position:    " << robotCentreTranslation.transpose() << "\n";
                         std::cout << "Minimum safe distance: " << _minimumSafeDistance << "\n";
                         std::cout << "Distance: " << _distanceToObstacle[k] << "\n\n";
                         
@@ -288,9 +280,9 @@ DDPThreeCircleFootprint::track_trajectory(const std::vector<RobotLibrary::Model:
                     
                     double distanceSquared = _distanceToObstacle[k] * _distanceToObstacle[k] + 1e-08;                           // Add a tiny error to prevent large numbers
 
-                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * r / distanceSquared;
+                    potentialGradient.head(2) += - (_obstaclePotentialScalar / potentialDivisor) * translationVector / distanceSquared;
                     
-                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (r * r.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
+                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (translationVector * translationVector.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
                 
                     
                 }
