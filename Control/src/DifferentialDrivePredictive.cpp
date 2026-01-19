@@ -147,8 +147,6 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 
                 Vector3d potentialGradient = - _poseErrorWeight[j] * currentPose.error(desiredStates[j].pose); // NOTE: Force is K * e = - dP/dx
                 
-                _distanceToObstacle.resize(obstacles[j].size());                                    // Store distance to every obstacle
-                
                 // Compute force from all obstacles
                 for (int k = 0; k < obstacles[j].size(); ++k)
                 {
@@ -166,8 +164,16 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                                  "Collision detected on prediction step " + std::to_string(j+1) + " "
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
+
+                    /**************************** Harmonic ***************************************/
+                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
+                                               * translation / (pow(distance,2.0) + 1e-06);
+                    /******************************************************************************/
                     
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor) * translation / (distance * distance + 1e-08);
+                    /****************************** NON Harmonic **********************************
+                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
+                                               * translation / (pow(distance,3.0) + 1e-06);
+                    /*******************************************************************************/
                 }
 
                 lagrangeMultipliers = -potentialGradient;                
@@ -176,7 +182,7 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
             {
                 // Variables used in this scope
                 double angle = _predictedStates[j].pose.angle();
-                
+ 
                 Pose2D currentPose = _predictedStates[j].pose;
                 Pose2D nextPose    = _predictedStates[j+1].pose;
                 
@@ -188,9 +194,9 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 
                 Vector3d potentialGradient = - potentialHessian * nextPose.error(desiredStates[j+1].pose); // Error at NEXT step, K * e[j+1]
                 
-                _distanceToObstacle.resize(obstacles[j+1].size());
+                _distanceToObstacle.resize(obstacles[j+1].size());                                  // We need this to enforce obstacle constraints
                 
-                _unitVector.resize(obstacles[j+1].size());
+                _unitVector.resize(obstacles[j+1].size());                                          // We need this to enforce obstacle constraints
                 
                 // Add up effects from obstacles
                 for (int k = 0; k < obstacles[j+1].size(); ++k)
@@ -198,9 +204,9 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                     Vector2d robotPosition     = nextPose.translation();
                     Vector2d pointOnSurface    = obstacles[j+1][k].point_on_surface(robotPosition);
                     Vector2d translationVector = robotPosition - pointOnSurface;
-                    
-                    _unitVector[k] = translationVector.normalized();
-                    
+
+                    // We need to save these to scale the step size later
+                    _unitVector[k] = translationVector.normalized();               
                     _distanceToObstacle[k] = translationVector.norm() - _minimumSafeDistance;
 
                     if (_distanceToObstacle[k] <= 0.0)
@@ -210,14 +216,24 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                                                  "with obstacle " + std::to_string(k+1) + ".");
                     }
                     
-                    double distanceSquared = _distanceToObstacle[k] * _distanceToObstacle[k] + 1e-08; // Add a tiny error to prevent large numbers
+                    /******************************** Harmonic ************************************/
+                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
+                                               * translationVector / (pow(_distanceToObstacle[k],2.0) + 1e-06);
 
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor) * translationVector / distanceSquared;
-                    
-                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / potentialDivisor) * ( 2 * (translationVector * translationVector.transpose()) / distanceSquared - Matrix2d::Identity()) / distanceSquared;
+                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / (potentialDivisor * (pow(_distanceToObstacle[k],2.0) + 1e-06)))
+                                                     * ( 2.0 * (translationVector * translationVector.transpose()) / (pow(_distanceToObstacle[k],2.0) + 1e-06)   - Matrix2d::Identity());
+                    /*******************************************************************************/
+
+                    /******************************** NON Harmonic ********************************
+                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
+                                               * translationVector / (pow(_distanceToObstacle[k],3.0) + 1e-06);
+
+                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / (potentialDivisor * (pow(_distanceToObstacle[k],3.0) + 1e-06)))
+                                                     * ( 3.0 * (translationVector * translationVector.transpose()) / (pow(_distanceToObstacle[k],2.0) + 1e-06)   - Matrix2d::Identity());
+                    /*******************************************************************************/
                 }
                 
-                // Compute Newton and update control input u
+                // Compute Newton step and update control input u
                 
                 Vector3d temp = potentialGradient - lagrangeMultipliers;
                 
@@ -232,6 +248,8 @@ DifferentialDrivePredictive::track_trajectory(const std::vector<RobotLibrary::Mo
                 d2Ldudx(0,2) += (temp[0] * sin(angle) - temp[1] * cos(angle)) / _controlFrequency;  // This is d^2f/dudx^T * (dp/dx - lambda[i+1])
                                            
                 Matrix<double,2,2> d2Ldu2 = M + dfdu.transpose() * potentialHessian * dfdu;         // Second derivative of Lagrangian w.r.t. control u
+                d2Ldu2(0,0) += 1e-02;
+                d2Ldu2(1,1) += 1e-02;
                 
                 Vector3d dx = currentPose.error(desiredStates[j].pose);                             // Solve for the optimal step size
                 
