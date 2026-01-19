@@ -46,4 +46,5 @@ Ellipsoid<Dim>::point_on_surface(const Eigen::Vector<double,Dim> &referencePoint
     return referencePoint / sqrt(referencePoint.dot(_LLT.solve(referencePoint)));
 }
 
-} } // namespace
+
+}} // namespace

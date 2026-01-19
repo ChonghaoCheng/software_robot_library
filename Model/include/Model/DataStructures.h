@@ -55,6 +55,8 @@ struct DifferentialDriveParameters
     double maxLinearAcceleration  = 5.0;                                                            ///< Maximum forward acceleration (m/s/s)
     double maxLinearVelocity      = 2.0;                                                            ///< Maximum forward speed (m/s)
     double minimumSafeDistance    = 0.5;                                                            ///< Used for collision detection
+    Eigen::Vector3d robotRadii    = {0.3, 0.3, 0.3};
+    Eigen::Vector3d robotLengths  = {-0.0, 0.0, 0.0};
     
     Eigen::Matrix3d propagationUncertainty = Eigen::Matrix3d::Identity();                           ///< Uncertainty of configuration propagation in Kalman filter
 

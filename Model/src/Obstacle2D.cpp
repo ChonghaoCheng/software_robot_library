@@ -42,7 +42,7 @@ Obstacle2D::point_on_surface(const Eigen::Vector2d &referencePoint) const
 {
     Eigen::Vector2d transformedPoint = _pose.inverse() * referencePoint;
     
-    return _pose * _shape->point_on_surface(transformedPoint);
+    return _shape->point_on_surface(transformedPoint);
 }
 
 } } // namespace RobotLibrary::Model

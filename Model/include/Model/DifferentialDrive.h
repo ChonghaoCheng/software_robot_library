@@ -115,6 +115,10 @@ class DifferentialDrive : public RigidBody2D
         Eigen::Matrix3d _covariance = Eigen::Matrix3d::Identity();                                  ///< Uncertainty of the pose
 
         Eigen::Matrix3d _propagationUncertainty = Eigen::Matrix3d::Identity();                      ///< Additional uncertainty on pose propagation
+        
+        Eigen::Vector3d _robotRadii = {0.2,0.3,0.0};
+
+        Eigen::Vector3d _robotLengths = {-0.2, 0.0, 0.2};
 }; 
 
 } } // namespace

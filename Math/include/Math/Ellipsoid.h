@@ -53,6 +53,7 @@ class Ellipsoid : public Shape<Dim>
         Eigen::Vector<double,Dim>
         point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const override;
 
+
     private:
         
         Eigen::LLT<Eigen::Matrix<double, Dim, Dim>> _LLT;                                           ///< Cholesky decomposition of the shape matrix.
