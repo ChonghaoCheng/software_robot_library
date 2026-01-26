@@ -34,7 +34,6 @@ class Unicycle : public RigidBody2D
     
         /**
          * @brief Constructor.
-         * @param parameters A data structure containing physical properties.
          */
         Unicycle(const RobotLibrary::Model::UnicycleParameters &parameters);
         
@@ -120,8 +119,8 @@ class Unicycle : public RigidBody2D
         Eigen::Vector3d _robotRadii = {0.2,0.3,0.0};
 
         Eigen::Vector3d _robotLengths = {-0.2, 0.0, 0.2};
-};                                                                                                  // Semicolon needed after class declaration
+}; 
 
 } } // namespace
 
-#endif
+#endif                                                                                             // Semicolon needed after class declaration

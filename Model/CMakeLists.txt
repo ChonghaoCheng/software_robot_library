@@ -1,7 +1,6 @@
 
 # List the source files for this library
-add_library(Model src/DifferentialDrive.cpp
-                  src/Joint.cpp
+add_library(Model src/Joint.cpp
                   src/KinematicTree.cpp
                   src/Link.cpp
                   src/Obstacle2D.cpp
@@ -9,6 +8,7 @@ add_library(Model src/DifferentialDrive.cpp
                   src/Pose2D.cpp
                   src/RigidBody.cpp
                   src/RigidBody2D.cpp
+                  src/Unicycle.cpp
                   src/tinyxml2.cpp
 )
 
@@ -18,7 +18,7 @@ target_include_directories(Model PUBLIC
     $<INSTALL_INTERFACE:include/RobotLibrary>
 )
 
-target_link_libraries(Model PUBLIC Math Eigen3::Eigen)                                             # Other libraries needed to compile this one
+target_link_libraries(Model PUBLIC Math Eigen3::Eigen)                                              # Other libraries needed to compile this one
 
 # Installation instructions
 install(TARGETS  Model
@@ -30,6 +30,6 @@ install(TARGETS  Model
 )
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/                                              # The directory we want to install
-        DESTINATION include/RobotLibrary                                                      # Where to install it
+        DESTINATION include/RobotLibrary                                                            # Where to install it
         FILES_MATCHING PATTERN "*.h"
 )

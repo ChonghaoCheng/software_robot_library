@@ -61,9 +61,9 @@ struct SerialLinkParameters
 /**
  * @brief A data structure for parameters in the feedback control class.
  */
-struct DifferentialDriveFeedbackParameters
+struct UnicycleFeedbackParameters
 {
-    DifferentialDriveFeedbackParameters() = default;
+    UnicycleFeedbackParameters() = default;
     
     double controlFrequency    = 100.0;                                                             ///< Rate at which control is computed
     double minimumSafeDistance =   1.0;                                                             ///< Used in collision avoidance
@@ -71,15 +71,34 @@ struct DifferentialDriveFeedbackParameters
     double xPositionGain       =   5.0;                                                             ///< Feedback gain on x position error
     double yPositionGain       =  25.0;                                                             ///< Feedback gain on y position error
 
-    SolverOptions<double> qpsolver = SolverOptions<double>();                                       ///< For underlying QP solver
+    SolverOptions<double> qpSolver = SolverOptions<double>();                                       ///< For underlying QP solver
 };
 
 /**
  * @brief A data structure containing parameters for model predictive control.
  */
-struct DifferentialDrivePredictiveParameters
+struct UnicyclePredictiveParameters
 {
-    DifferentialDrivePredictiveParameters() = default;
+    UnicyclePredictiveParameters() = default;
+
+    double controlFrequency         = 100.0;                                                        ///< Rate at which control is calculated / implemented
+    double exponent                 = 0.01;                                                         ///< Scales the pose error weight across the horizon
+    double maximumControlStepNorm   = 1e-04;                                                        ///< Threshold for terminating optimisation
+    double obstaclePotentialScalar  = 1e-03;                                                        ///< Scales the magnitude of the repulsion force
+    unsigned int numberOfRecursions = 10;                                                           ///< Number of forward & backward passes to optimise control
+    unsigned int predictionSteps    = 50;                                                           ///< Length of prediction horizon
+    
+    Eigen::Matrix3d poseErrorWeight = (Eigen::MatrixXd(3,3) << 200.0,   0.00,  0.00,
+                                                                 0.0, 200.00, -0.09, 
+                                                                 0.0,  -0.09,  0.10).finished();
+};
+
+/**
+ * @brief A data structure containing parameters for model predictive control.
+ */
+struct DDPThreeCircleFootprintParameters
+{
+    DDPThreeCircleFootprintParameters() = default;
 
     double controlFrequency         = 100.0;                                                        ///< Rate at which control is calculated / implemented
     double exponent                 = 0.01;                                                         ///< Scales the pose error weight across the horizon
@@ -93,6 +112,7 @@ struct DifferentialDrivePredictiveParameters
                                  0.0, 200.00, -0.09, 
                                  0.0,  -0.09,  0.10).finished();
 };
+
 
 /**
  * @brief A container for a control barrier function.

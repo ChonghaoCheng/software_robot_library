@@ -78,13 +78,19 @@ class RigidBody2D
          */
         const std::string&
         name() const { return _name; }
+        
+        /**
+         * @brief Set the name of this rigid body object.
+         */
+        void
+        set_name(const std::string &name) { _name = name; }
 
         /**
          * @brief Update the state of this object.
          */
         void
         update_state(const Pose2D &pose,
-                     const Eigen::Vector3d &twist);
+                     const Eigen::Vector3d &twist = Eigen::Vector3d::Zero());
 
     protected:
     

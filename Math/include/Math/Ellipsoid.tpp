@@ -25,11 +25,11 @@ namespace RobotLibrary { namespace Math {
 template <unsigned int Dim>
 Ellipsoid<Dim>::Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix)
 {
-    _shapeMatrix = shapeMatrix;
+    _shapeMatrix = shapeMatrix;                                                                     // Save internally
     
-    _LLT = shapeMatrix.llt();
+    _LLT = shapeMatrix.llt();                                                                       // Pre-compute decomposition to save time
          
-    if (_LLT.info() != Eigen::Success)
+    if (not _LLT.info() == Eigen::Success)
     {
         throw std::runtime_error("[ERROR] [ELLIPSOID] Constructor: "
                                  "Shape matrix is not positive definite; Cholesky decomposition failed.");
@@ -43,7 +43,13 @@ template <unsigned int Dim>
 Eigen::Vector<double,Dim>
 Ellipsoid<Dim>::point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const
 {
+    // Ellipsoid: E = { x | x^T A^{-1} x = 1 } (centered at origin)
+    // Given a reference direction r, find the intersection of the ray x = λ r
+    // with the ellipsoid surface.
+    // Solve (λ r)^T A^{-1} (λ r) = 1  ⇒  λ = 1 / sqrt(r^T A^{-1} r)
+    // => p = r / sqrt(r^T A^{-1} r)
+
     return referencePoint / sqrt(referencePoint.dot(_LLT.solve(referencePoint)));
 }
 
-} } // namespace
+}} // namespace

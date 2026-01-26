@@ -1,12 +1,13 @@
 
 # List the source files for this library
 
-add_library(Control src/DifferentialDriveBase.cpp
-                    src/DifferentialDriveFeedback.cpp
-                    src/DifferentialDrivePredictive.cpp
+add_library(Control #src/DDPThreeCircleFootprint.cpp
                     src/SerialLinkBase.cpp
                     src/SerialLinkImpedance.cpp
                     src/SerialLinkKinematic.cpp
+                    src/UnicycleBase.cpp
+                    src/UnicycleFeedback.cpp
+                    src/UnicyclePredictive.cpp
 )
 
 # Specify targets to be built

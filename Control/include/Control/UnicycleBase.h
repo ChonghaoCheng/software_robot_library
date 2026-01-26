@@ -1,5 +1,5 @@
 /**
- * @file    DifferentialDriveBase.h
+ * @file    UnicycleBase.h
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    May 2025
@@ -14,24 +14,21 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
  
-#ifndef DIFFERENTIAL_DRIVE_BASE_H
-#define DIFFERENTIAL_DRIVE_BASE_H
+#ifndef UNICYCLE_BASE_H
+#define UNICYCLE_BASE_H
 
 #include <Control/DataStructures.h>
-#include <Math/QPSolver.h>
-#include <Model/DifferentialDrive.h>
+#include <Model/Unicycle.h>
 #include <Model/Obstacle2D.h>
 
 namespace RobotLibrary { namespace Control {
 
-class DifferentialDriveBase : public QPSolver<double>,
-                              public RobotLibrary::Model::DifferentialDrive
+class UnicycleBase : public RobotLibrary::Model::Unicycle
 {
     public:
     
-        DifferentialDriveBase(const double &controlFrequency,
-                              const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
-                              const SolverOptions<double> &solverOptions);
+        UnicycleBase(const double &controlFrequency,
+                     const RobotLibrary::Model::UnicycleParameters &modelParameters);
                               
         /**
          * @brief Get the predicted pose at the next time step given the current state.
@@ -39,24 +36,18 @@ class DifferentialDriveBase : public QPSolver<double>,
         RobotLibrary::Model::Pose2D
         predicted_pose()
         { 
-            return RobotLibrary::Model::DifferentialDrive::predicted_pose(_pose, velocity(), _controlFrequency);
+            return RobotLibrary::Model::Unicycle::predicted_pose(_pose, velocity(), _controlFrequency);
         }
     
     protected:
 
         double _controlFrequency = 100.0;                                                           ///< Rate at which control commands are sent to robot
-
         Eigen::Matrix<double, Eigen::Dynamic, 2> _constraintMatrix;                                 ///< For the QP solver
-        
-        Eigen::Matrix<double, 4, 2> _controlConstraintMatrix;                                       ///< Limits on the instantaneous velocity
-        
+        Eigen::Matrix<double, 4, 2>              _controlConstraintMatrix;                          ///< Limits on the instantaneous velocity
         Eigen::Matrix<double, Eigen::Dynamic, 2> _obstacleConstraintMatrix;                         ///< Part of the control barrier function
-        
-        Eigen::Vector<double, Eigen::Dynamic> _constraintVector;                                    ///< Limits on instantaneous velocity
-        
-        Eigen::Vector<double, 4> _controlConstraintVector;                                          ///< For the QP solver
-        
-        Eigen::Vector<double, Eigen::Dynamic> _obstacleConstraintVector;                            ///< Part of the control barrier function
+        Eigen::Vector<double, Eigen::Dynamic>    _constraintVector;                                 ///< Limits on instantaneous velocity
+        Eigen::Vector<double, 4>                 _controlConstraintVector;                          ///< For the QP solver
+        Eigen::Vector<double, Eigen::Dynamic>    _obstacleConstraintVector;                         ///< Part of the control barrier function
         
         /**
          * @brief Compute the instantaneous limits on the linear & angular velocity.

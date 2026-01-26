@@ -28,8 +28,8 @@ else()
     message(STATUS "Downloading from https://github.com/Woolfrey/software_simple_qp ...")
     
     file(DOWNLOAD
-        https://raw.githubusercontent.com/Woolfrey/software_simple_qp/master/include/QPSolver.h
-        ${CMAKE_SOURCE_DIR}/Math/include/Math/QPSolver.h)
+    https://raw.githubusercontent.com/Woolfrey/software_simple_qp/refs/heads/devel/include/QPSolver.h
+    ${CMAKE_SOURCE_DIR}/Math/include/Math/QPSolver.h)
         
     if(EXISTS "${CMAKE_SOURCE_DIR}/Math/include/Math/QPSolver.h")
         message(STATUS "... Done!")

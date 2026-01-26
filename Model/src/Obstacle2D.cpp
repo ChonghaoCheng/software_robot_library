@@ -32,6 +32,12 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
     // Worker bees can leave.
     // Even drones can fly away.
     // The Queen is their slave.
+    
+    if (_shape == nullptr)
+    {
+        throw std::invalid_argument("[ERROR] [OBSTACLE 2D] Constructor: "
+                                    "Shape argument is a null pointer.\n");
+    }
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -40,9 +46,9 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
 Eigen::Vector2d
 Obstacle2D::point_on_surface(const Eigen::Vector2d &referencePoint) const
 {
-    Eigen::Vector2d transformedPoint = _pose.inverse() * referencePoint;
+    Eigen::Vector2d transformedPoint = _pose.inverse() * referencePoint;                            // Transform point to local frame of shape
     
-    return _pose * _shape->point_on_surface(transformedPoint);
+    return _pose * _shape->point_on_surface(transformedPoint);                                      // Get point on surface and map back to world frame
 }
 
 } } // namespace RobotLibrary::Model

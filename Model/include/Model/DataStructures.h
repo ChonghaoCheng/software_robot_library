@@ -44,9 +44,9 @@ struct ReferenceFrame
 };
 
 /**
- * @brief A struct for collating parameters for the DifferentialDrive
+ * @brief A struct for collating parameters for the Unicycle
  */
-struct DifferentialDriveParameters
+struct UnicycleParameters
 {
     double inertia                = 0.5 * 5.0 * 0.25 * 0.25;                                        ///< Rotational inertia (kg*m^2)
     double mass                   = 5.0;                                                            ///< Weight (kg)
@@ -58,23 +58,26 @@ struct DifferentialDriveParameters
     
     Eigen::Matrix3d propagationUncertainty = Eigen::Matrix3d::Identity();                           ///< Uncertainty of configuration propagation in Kalman filter
 
-    DifferentialDriveParameters() = default;
+    Eigen::Vector3d robotRadii    = {0.3, 0.3, 0.3};
+    Eigen::Vector3d robotLengths  = {-0.0, 0.0, 0.0};
+    
+    UnicycleParameters() = default;
 };
 
 /**
  * @brief A struct that fully defines the state of a differential drive robot.
  */
-struct DifferentialDriveState
+struct UnicycleState
 {
     Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity();                                       ///< Uncertainty of the pose
     Eigen::Vector2d velocity = {0.0, 0.0};                                                          ///< Linear & angular velocity, respectively
     RobotLibrary::Model::Pose2D pose;                                                               ///< Position & orientation relative to a reference frame.
 
-    DifferentialDriveState() = default;
+    UnicycleState() = default;
 
-    DifferentialDriveState(const RobotLibrary::Model::Pose2D& p,
-                           const Eigen::Vector2d& v)
-        : pose(p), velocity(v) {}
+    UnicycleState(const RobotLibrary::Model::Pose2D& p,
+                  const Eigen::Vector2d& v)
+    : pose(p), velocity(v) {}
 };
 
 } } // namespace

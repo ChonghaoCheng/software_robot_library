@@ -1,12 +1,12 @@
 /**
- * @file    DifferentialDriveFeedback.h
+ * @file    UnicycleFeedback.h
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    May 2025
  * @version 1.0
  * @brief   A class for feedback control of a differential drive robot.
  *
- * @details This class inherits the RobotLibrary::Model::DifferentialDriveBase and provides a simple
+ * @details This class inherits the RobotLibrary::Model::UnicycleBase and provides a simple
  *          method for nonlinear feedback control.
  * 
  * @copyright (c) 2025 Jon Woolfrey
@@ -17,10 +17,11 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
  
-#ifndef DIFFERENTIAL_DRIVE_FEEDBACK_H
-#define DIFFERENTIAL_DRIVE_FEEDBACK_H
+#ifndef UNICYCLE_FEEDBACK_H
+#define UNICYCLE_FEEDBACK_H
 
-#include <Control/DifferentialDriveBase.h>
+#include <Control/UnicycleBase.h>
+#include <Math/QPSolver.h>
 
 namespace RobotLibrary { namespace Control {
 
@@ -28,7 +29,8 @@ namespace RobotLibrary { namespace Control {
  * @brief A class that performs nonlinear feedback control for trajectory tracking of a differential
  *        drive mobile robot.
  */
-class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriveBase
+class UnicycleFeedback : public RobotLibrary::Control::UnicycleBase,
+                         public QPSolver<double>
 {
     public:
     
@@ -39,8 +41,8 @@ class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriv
          * @param orientationGain Feedback gain on orientation error
          * @param parameters Model parameters for the base class.
          */
-        DifferentialDriveFeedback(const RobotLibrary::Model::DifferentialDriveParameters &modelParameters = RobotLibrary::Model::DifferentialDriveParameters(),
-                                  const RobotLibrary::Control::DifferentialDriveFeedbackParameters &controlParameters = RobotLibrary::Control::DifferentialDriveFeedbackParameters());
+        UnicycleFeedback(const RobotLibrary::Model::UnicycleParameters &modelParameters = RobotLibrary::Model::UnicycleParameters(),
+                         const RobotLibrary::Control::UnicycleFeedbackParameters &controlParameters = RobotLibrary::Control::UnicycleFeedbackParameters());
 
         /**
          * @brief Solve the (nonlinear) feedback control problem to track a trajectory.
@@ -65,7 +67,7 @@ class DifferentialDriveFeedback : public RobotLibrary::Control::DifferentialDriv
              * @brief Compute the control barrier constraints for an obstacle.
              */
             RobotLibrary::Control::BarrierConstraints
-            compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
+            compute_barrier_constraints(const RobotLibrary::Model::UnicycleState &state,
                                         const RobotLibrary::Model::Obstacle2D &obstacle);
 };                                                                                                  // Semicolon needed after class declaration
 

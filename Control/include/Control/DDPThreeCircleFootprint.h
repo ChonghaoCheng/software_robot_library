@@ -1,16 +1,19 @@
 /**
- * @file    DifferentialDrivePredictive.h
- * @author  Jon Woolfrey
+ * @file    DDPThreeCircleFootprint.h
+ * @author  Jon Woolfrey & Vignesh Sushrutha Raghavan
  * @email   jonathan.woolfrey@gmail.com
- * @date    May 2025
+ * @date    January 2026
  * @version 1.0
- * @brief   A class that performs model predictive control for a differential drive robot.
+ * @brief   A class that performs model predictive control for a differential drive robot represented by an apprximate ellipsoid.
  *
  * @details This class solves the predictive control problem for differential drive robot over a
  *          finite number of steps. It uses quadratic functions for both the final step, and all
  *          intermediate steps. The weighting on the final & intermediate pose errors are used as
  *          constructor arguments, whereas the weighting on intermediate control values is based on
- *          the robot's mass & inertia in the RobotLibary::Model::DifferentialDrive class.
+ *          the robot's mass & inertia in the RobotLibary::Model::Unicycle class. The robotis
+ *          represented as 3 intersecting circles approximating a 2D ellipse. This class is an adaptation
+ *          of the UnicyclePredictive(DDP) class to separate simple circular footprint and
+ *          custom footprint representation.
  * 
  * @copyright (c) 2025 Jon Woolfrey
  *
@@ -20,11 +23,11 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
  
-#ifndef DIFFERENTIAL_DRIVE_PREDICTIVE_H
-#define DIFFERENTIAL_DRIVE_PREDICTIVE_H
+#ifndef DDP_THREE_CIRCLE_FOOTPRINT_H
+#define DDP_THREE_CIRCLE_FOOTPRINT_H
 
 #include <Control/DataStructures.h>
-#include <Control/DifferentialDriveBase.h>
+#include <Control/UnicycleBase.h>
 #include <Math/Ellipsoid.h>
 
 namespace RobotLibrary { namespace Control {
@@ -33,7 +36,7 @@ namespace RobotLibrary { namespace Control {
  * @brief A class that performs nonlinear feedback control for trajectory tracking of a differential
  *        drive mobile robot.
  */
-class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDriveBase
+class DDPThreeCircleFootprint : public RobotLibrary::Control::UnicycleBase
 {
     public:
     
@@ -44,8 +47,8 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
          * @param orientationGain Feedback gain on orientation error
          * @param parameters Model parameters for the base class.
          */
-        DifferentialDrivePredictive(RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
-                                    RobotLibrary::Control::DifferentialDrivePredictiveParameters &controlParameters,
+        DDPThreeCircleFootprint(RobotLibrary::Model::UnicycleParameters &modelParameters,
+                                    RobotLibrary::Control::DDPThreeCircleFootprintParameters &controlParameters,
                                     SolverOptions<double> &solverOptions);
           
         /**
@@ -55,20 +58,20 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
          * @return The linear & angular velocity to track the trajectory.
          */
         Eigen::Vector2d
-        track_trajectory(const std::vector<RobotLibrary::Model::DifferentialDriveState>  &desiredStates,
+        track_trajectory(const std::vector<RobotLibrary::Model::UnicycleState>  &desiredStates,
                          const std::vector<std::vector<RobotLibrary::Model::Obstacle2D>> &obstacles);
         
         /**
          * @brief Get the predicted state at a specified step.
          * @param i The ith step of the prediction horizon, between 0 and N
          */
-        RobotLibrary::Model::DifferentialDriveState
+        RobotLibrary::Model::UnicycleState
         predicted_state(const unsigned int &i);
         
         /**
          * @brief Retrieve the (current and) predicted states for the robot.
          */
-        std::vector<RobotLibrary::Model::DifferentialDriveState>
+        std::vector<RobotLibrary::Model::UnicycleState>
         predicted_states() const { return _predictedStates; }
         
         /**
@@ -102,10 +105,26 @@ class DifferentialDrivePredictive : public RobotLibrary::Control::DifferentialDr
         
         std::vector<Eigen::Matrix2d> _controlWeight;                                                ///< Weighting on the intermediate control
   
-        std::vector<Eigen::Vector2d> _unitVector;
-  
-        std::vector<RobotLibrary::Model::DifferentialDriveState> _predictedStates;                  ///< Pose, velocity, and covariance over the prediction horizon
+        std::vector<RobotLibrary::Model::UnicycleState> _predictedStates;                  ///< Pose, velocity, and covariance over the prediction horizon
 
+        std::vector<Eigen::Vector2d> _unitVector;
+
+        /**
+         * @brief Compute the components needed to insert a CBF in to a QP solver.
+         * @note This overrides the virtual method in the base class.
+         * @param pose The position and orientation of the robot for which to compute the CBF.
+         * @param obstacle I think it's obvious.
+         * @return A struct containing a row vector and a scalar.
+         * @note This is a virtual method and must be defined in any derived class.
+         */
+        RobotLibrary::Control::BarrierConstraints
+        compute_barrier_constraints(const RobotLibrary::Model::UnicycleState &state,
+                                    const RobotLibrary::Model::Obstacle2D &obstacle);
+        
+        RobotLibrary::Control::BarrierConstraints
+        compute_barrier_constraints(const RobotLibrary::Model::Pose2D &pose,
+                                    const RobotLibrary::Model::Obstacle2D &obstacle,
+                                    bool &ellipse);
 };                                                                                                  // Semicolon needed after class declaration
 
 } } // Namespace                                                                                      

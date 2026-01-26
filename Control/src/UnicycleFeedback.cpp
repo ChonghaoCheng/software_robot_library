@@ -1,10 +1,10 @@
 /**
- * @file    DifferentialDriveFeedback.cpp
+ * @file    UnicycleFeedback.cpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    May 2025
  * @version 1.0
- * @brief   Source files for the DifferentialDriveFeedback control class.
+ * @brief   Source files for the UnicycleFeedback control class.
  *
  * @details This class provides method for implementing nonlinear feedback control of a differential
  *          drive robot.
@@ -17,24 +17,23 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
  
-#include <Control/DifferentialDriveFeedback.h>
+#include <Control/UnicycleFeedback.h>
 
 namespace RobotLibrary { namespace Control {
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                                        Constructor                                             //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
-                                                     const RobotLibrary::Control::DifferentialDriveFeedbackParameters &controlParameters)
-: DifferentialDriveBase(controlParameters.controlFrequency,
-                        modelParameters,
-                        controlParameters.qpsolver),
+UnicycleFeedback::UnicycleFeedback(const RobotLibrary::Model::UnicycleParameters &modelParameters,
+                                   const RobotLibrary::Control::UnicycleFeedbackParameters &controlParameters)
+: UnicycleBase(controlParameters.controlFrequency,
+               modelParameters),
+  QPSolver<double>(controlParameters.qpSolver),
   _orientationGain(controlParameters.orientationGain),
   _xPositionGain(controlParameters.xPositionGain),
   _yPositionGain(controlParameters.yPositionGain)
 {
-    _minimumSafeDistance = 0.1; // NEED TO FIX THIS
-    
+    // Check that the inputs are sound
     if (_xPositionGain   <= 0
     or  _yPositionGain   <= 0
     or  _orientationGain <= 0)
@@ -51,9 +50,9 @@ DifferentialDriveFeedback::DifferentialDriveFeedback(const RobotLibrary::Model::
  //                         Solve the control to track a desired trajectory                        //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
-DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &desiredPose,
-                                            const Eigen::Vector2d &desiredVelocity,
-                                            const std::vector<RobotLibrary::Model::Obstacle2D> &obstacles)
+UnicycleFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &desiredPose,
+                                   const Eigen::Vector2d &desiredVelocity,
+                                   const std::vector<RobotLibrary::Model::Obstacle2D> &obstacles)
 {
     using namespace Eigen;
     using namespace RobotLibrary;
@@ -73,10 +72,6 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     // min_u 1/2 (u_d - u)^T M (u_d - u)
     //  subject to: B * u <= z
     // Hessian H == M, and f == - M * u_d
-    
-    Matrix2d H;
-    H << _mass,      0.0,
-           0.0, _inertia;
                            
     Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
                    -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
@@ -95,21 +90,22 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     int n = obstacles.size();                                                                       // Makes referencing easier                             
     _obstacleConstraintMatrix.resize(n,2);
     _obstacleConstraintVector.resize(n);
-    
+
     for (int i = 0; i < n; ++i)
     {
-        Model::DifferentialDriveState state;
+
+        Model::UnicycleState state;
         state.pose = _pose;
         state.velocity[0] = cos(_pose.angle()) * _twist[0] + sin(_pose.angle()) * _twist[1];
         state.velocity[1] = _twist[2];
-        
+
         const auto &[scalar, rowVector] = compute_barrier_constraints(state , obstacles[i]);
-        
+
         _obstacleConstraintMatrix.row(i) = rowVector;
         
         _obstacleConstraintVector(i) = scalar;
     }
-           
+      
     _constraintMatrix.resize(4+n,2);
     _constraintMatrix.block(0,0,4,2) = _controlConstraintMatrix;
     _constraintMatrix.block(4,0,n,2) = _obstacleConstraintMatrix;
@@ -117,32 +113,32 @@ DifferentialDriveFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &d
     _constraintVector.resize(4+n);
     _constraintVector.head(4) = _controlConstraintVector;
     _constraintVector.tail(n) = _obstacleConstraintVector; 
-       
-    Eigen::Vector2d u = solve(H,f,_constraintMatrix, _constraintVector, velocity());
  
-    return u;
+    return QPSolver<double>::solve(_inertiaMatrix,f,_constraintMatrix, _constraintVector, velocity());
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                 Compute the constraint barrier vector and scalar for an obstacle               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 RobotLibrary::Control::BarrierConstraints
-DifferentialDriveFeedback::compute_barrier_constraints(const RobotLibrary::Model::DifferentialDriveState &state,
-                                                       const RobotLibrary::Model::Obstacle2D &obstacle)
+UnicycleFeedback::compute_barrier_constraints(const RobotLibrary::Model::UnicycleState &state,
+                                              const RobotLibrary::Model::Obstacle2D &obstacle)
 {
     using namespace Eigen;                                                                          // For brevity
-    
+
     Vector2d robotPosition = state.pose.translation();
-    
+
     Vector2d displacement = robotPosition - obstacle.point_on_surface(robotPosition);               //(nearest?) point on surace
-    
+ 
     double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
+
 
     if (distance < 0.0)
     {
         throw std::runtime_error("[ERROR] [DIFFERENTIAL DRIVE FEEDBACK] compute_barrier_constraints(): "
                                  "Collision with '" + obstacle.name() + "' obstacle detected.");
     }
+    
     
     double angle = state.pose.angle();
     

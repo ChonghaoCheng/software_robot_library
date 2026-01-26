@@ -1,10 +1,10 @@
 /**
- * @file    DifferentialDrive.cpp
+ * @file    Unicycle.cpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    May 2025
  * @version 1.0
- * @brief   A base class for control of differential drives robots.
+ * @brief   A base class for control of UNICYCLEs robots.
  *
  * @details This class is a simple model that serves as a base for control classes.
  *
@@ -16,32 +16,34 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
 
-#include <Model/DifferentialDrive.h>
+#include <Model/Unicycle.h>
 
 namespace RobotLibrary { namespace Model {
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                                         Constructor                                            //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriveParameters &parameters)
+Unicycle::Unicycle(const RobotLibrary::Model::UnicycleParameters &parameters)
 : RigidBody2D(parameters.mass, parameters.inertia),
   _maxAngularAcceleration(parameters.maxAngularAcceleration),
   _maxAngularVelocity(parameters.maxAngularVelocity),
   _maxLinearAcceleration(parameters.maxLinearAcceleration),
   _maxLinearVelocity(parameters.maxLinearVelocity),
   _minimumSafeDistance(parameters.minimumSafeDistance),
-  _propagationUncertainty(parameters.propagationUncertainty)
+  _propagationUncertainty(parameters.propagationUncertainty),
+  _robotRadii(parameters.robotRadii),
+  _robotLengths(parameters.robotLengths)
 {
     if (_mass <= 0 or _inertia <= 0)
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] Constructor: "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] Constructor: "
                                     "Mass and inertia must be positive. Received mass = " +
                                     std::to_string(_mass) + ", inertia = " + std::to_string(_inertia));
     }
     
     if (_maxLinearVelocity <= 0 or _maxAngularVelocity <= 0)
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] Constructor: "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] Constructor: "
                                     "Velocity limits must be positive. Received maxLinearVelocity = " +
                                     std::to_string(_maxLinearVelocity) +
                                     ", maxAngularVelocity = " + std::to_string(_maxAngularVelocity));
@@ -49,7 +51,7 @@ DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriv
 
     if (_maxLinearAcceleration <= 0 or _maxAngularAcceleration <= 0)
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] Constructor: "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] Constructor: "
                                     "Acceleration limits must be positive. Received maxLinearAcceleration = " +
                                     std::to_string(_maxLinearAcceleration) +
                                     ", maxAngularAcceleration = " + std::to_string(_maxAngularAcceleration));
@@ -58,7 +60,7 @@ DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriv
     std::string message;
     if (not RobotLibrary::Math::is_positive_definite(_propagationUncertainty, message))
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] Constructor: "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] Constructor: "
                                     "Propagation uncertainty matrix is not positive definite: " + message);
     }
 }
@@ -67,19 +69,19 @@ DifferentialDrive::DifferentialDrive(const RobotLibrary::Model::DifferentialDriv
  //                                   Udate the pose & velocity                                    //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void
-DifferentialDrive::update_state(const RobotLibrary::Model::Pose2D &pose,
-                                const Eigen::Vector2d &velocity,
-                                const Eigen::Matrix3d &covariance)
+Unicycle::update_state(const RobotLibrary::Model::Pose2D &pose,
+                       const Eigen::Vector2d &velocity,
+                       const Eigen::Matrix3d &covariance)
 {
     if (abs(velocity[0]) > _maxLinearVelocity)
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] update_state(): "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] update_state(): "
                                     "(Absolute) linear velocity greater than maximum ("
                                     + std::to_string(abs(velocity[0])) + " > " + std::to_string(_maxLinearVelocity) + ").");
     }
     else if (abs(velocity[1]) > _maxAngularVelocity)
     {
-        throw std::invalid_argument("[ERROR] [DIFFERENTIAL DRIVE] update_state(): "
+        throw std::invalid_argument("[ERROR] [UNICYCLE] update_state(): "
                                     "(Absolute) angular velocity greater than maximum ("
                                     + std::to_string(abs(velocity[1])) + " > " + std::to_string(_maxAngularVelocity) + ").");
     }
@@ -97,7 +99,7 @@ DifferentialDrive::update_state(const RobotLibrary::Model::Pose2D &pose,
  //                              Get the linear and angular velocity                               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
-DifferentialDrive::velocity()
+Unicycle::velocity()
 {
     Eigen::Vector2d velocity = { _twist[0] * cos(_pose.angle()) + _twist[1] * sin(_pose.angle()),
                                  _twist[2] };
@@ -109,9 +111,9 @@ DifferentialDrive::velocity()
  //                  Partial derivative of propagation equation w.r.t. configuration               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Matrix3d
-DifferentialDrive::configuration_jacobian(const RobotLibrary::Model::Pose2D &pose,
-                                          const Eigen::Vector2d &velocity,
-                                          const double &controlFrequency)
+Unicycle::configuration_jacobian(const RobotLibrary::Model::Pose2D &pose,
+                                 const Eigen::Vector2d &velocity,
+                                 const double &controlFrequency)
 {
     Eigen::Matrix3d A;
     
@@ -126,8 +128,8 @@ DifferentialDrive::configuration_jacobian(const RobotLibrary::Model::Pose2D &pos
  //                    Partial derivative of propagation equation w.r.t. control                   //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Matrix<double,3,2>
-DifferentialDrive::control_jacobian(const RobotLibrary::Model::Pose2D &pose,
-                                    const double &controlFrequency)
+Unicycle::control_jacobian(const RobotLibrary::Model::Pose2D &pose,
+                           const double &controlFrequency)
 {
     Eigen::Matrix<double,3,2> B;
     
@@ -142,9 +144,9 @@ DifferentialDrive::control_jacobian(const RobotLibrary::Model::Pose2D &pose,
  //                        Get the next predicted pose based a given pose & velocity               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 RobotLibrary::Model::Pose2D
-DifferentialDrive::predicted_pose(const RobotLibrary::Model::Pose2D &currentPose,
-                                  const Eigen::Vector2d &currentVelocity,
-                                  const double &controlFrequency)
+Unicycle::predicted_pose(const RobotLibrary::Model::Pose2D &currentPose,
+                         const Eigen::Vector2d &currentVelocity,
+                         const double &controlFrequency)
 {
     Eigen::Vector2d translation = {currentPose.translation()[0] + currentVelocity[0] * cos(currentPose.angle()) / controlFrequency,
                                    currentPose.translation()[1] + currentVelocity[0] * sin(currentPose.angle()) / controlFrequency};
@@ -158,10 +160,10 @@ DifferentialDrive::predicted_pose(const RobotLibrary::Model::Pose2D &currentPose
  //                                     Get the predicted covariance                               //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Matrix3d
-DifferentialDrive::predicted_covariance(const RobotLibrary::Model::Pose2D &currentPose,
-                                        const Eigen::Vector2d &currentVelocity,
-                                        const Eigen::Matrix3d &currentCovariance,
-                                        const double &controlFrequency)
+Unicycle::predicted_covariance(const RobotLibrary::Model::Pose2D &currentPose,
+                               const Eigen::Vector2d &currentVelocity,
+                               const Eigen::Matrix3d &currentCovariance,
+                               const double &controlFrequency)
 {
     Eigen::Matrix3d A = configuration_jacobian(currentPose, currentVelocity, controlFrequency);
     

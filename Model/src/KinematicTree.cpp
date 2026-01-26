@@ -285,7 +285,7 @@ KinematicTree::KinematicTree(const std::string &pathToURDF)
      std::cout << "[INFO] [KINEMATIC TREE] Successfully generated the '" << _name << "' robot model."
                << " It has " << _numberOfJoints << " joints (reduced from " << _fullLinkList.size() << ")." << std::endl;
 
-     #ifndef NDEBUG
+   //  #ifndef NDEBUG
           std::cout << "\nThe base link is: " << _baseName << ".\n";
           
           std::cout << "\nHere is a list of all the joints on the robot:\n";          
@@ -313,7 +313,7 @@ KinematicTree::KinematicTree(const std::string &pathToURDF)
           }
           std::cout << "\n";
           
-     #endif
+    // #endif
 }
  
   ///////////////////////////////////////////////////////////////////////////////////////////////////

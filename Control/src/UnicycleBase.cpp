@@ -1,5 +1,5 @@
 /**
- * @file    DifferentialDriveBase.cpp
+ * @file    UnicycleBase.cpp
  * @author  Jon Woolfrey
  * @email   jonathan.woolfrey@gmail.com
  * @date    May 2025
@@ -14,19 +14,17 @@
  * @see https://github.com/Woolfrey/software_robot_library for more information.
  */
  
-#include <Control/DifferentialDriveBase.h>
+#include <Control/UnicycleBase.h>
 
 namespace RobotLibrary { namespace Control {
  
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                                          Constructor                                           //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-DifferentialDriveBase::DifferentialDriveBase(const double &controlFrequency,
-                                             const RobotLibrary::Model::DifferentialDriveParameters &modelParameters,
-                                             const SolverOptions<double> &solverOptions)
-: DifferentialDrive(modelParameters),
-  _controlFrequency(controlFrequency),
-  QPSolver<double>(solverOptions)
+UnicycleBase::UnicycleBase(const double &controlFrequency,
+                           const RobotLibrary::Model::UnicycleParameters &modelParameters)
+: Unicycle(modelParameters),
+  _controlFrequency(controlFrequency)
 {
     // Esnure input arguments are sound
     if (_controlFrequency <= 0.0)
@@ -56,9 +54,9 @@ DifferentialDriveBase::DifferentialDriveBase(const double &controlFrequency,
  //                       Calculate instantaneous limits on linear & angular velocity              //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void
-DifferentialDriveBase::compute_control_limits(RobotLibrary::Model::Limits &linear,
-                                              RobotLibrary::Model::Limits &angular,
-                                              const Eigen::Vector2d &currentVelocity)
+UnicycleBase::compute_control_limits(RobotLibrary::Model::Limits &linear,
+                                     RobotLibrary::Model::Limits &angular,
+                                     const Eigen::Vector2d &currentVelocity)
 {
     linear.upper = std::min(_maxLinearVelocity,
                             currentVelocity[0] + _maxLinearAcceleration / _controlFrequency);
@@ -89,4 +87,3 @@ DifferentialDriveBase::compute_control_limits(RobotLibrary::Model::Limits &linea
 }
 
 } } // namespace
-
