@@ -41,6 +41,26 @@ Obstacle2D::Obstacle2D(std::unique_ptr<Shape2D> shape,
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                    Get geometric information about a point relative to this obstacle           //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Math::ShapeQuery<2>
+Obstacle2D::query_point(const Eigen::Vector2d &referencePoint) const
+{
+    // Transform point to local frame
+    Eigen::Vector2d localPoint = _pose.inverse() * referencePoint;
+
+    // Query shape in local frame
+    auto query = _shape->query_point(localPoint);
+
+    // Transform results back to world frame
+    query.translationVector = _pose.rotation() * query.translationVector;
+    query.unitVector        = _pose.rotation() * query.unitVector;
+    query.pointOnSurface    = _pose * query.pointOnSurface;
+
+    return query;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                                  Get a point on the surface                                    //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d
