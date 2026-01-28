@@ -43,7 +43,7 @@ class Ellipsoid : public Shape<Dim>
          * @param shapeMatrix A positive-definite matrix.
          */
         Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix);
-                         
+        
         /**
          * @brief Get a point on the circumference on the ray to the center.
          * @note This method overrides the one in the base class.
@@ -52,7 +52,14 @@ class Ellipsoid : public Shape<Dim>
          */
         Eigen::Vector<double,Dim>
         point_on_surface(const Eigen::Vector<double,Dim> &referencePoint) const override;
-
+        
+        /**
+         * @brief Compute info like distance, point on surface, etc. for this shape given an external point.
+         * @param referencePoint An external reference point to the shape.
+         * @return A struct with (signed) distance, translation vector, etc.
+         */
+        ShapeQuery<Dim>
+        query_point(const Eigen::Vector<double,Dim> &referencePoint) const override;
 
     private:
         

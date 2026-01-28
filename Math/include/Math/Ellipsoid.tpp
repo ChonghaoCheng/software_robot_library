@@ -35,6 +35,32 @@ Ellipsoid<Dim>::Ellipsoid(const Eigen::Matrix<double,Dim,Dim> &shapeMatrix)
                                  "Shape matrix is not positive definite; Cholesky decomposition failed.");
     }
 }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                        Compute geometry of a point relative to this shape                      //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+template <unsigned int Dim>
+ShapeQuery<Dim>
+Ellipsoid<Dim>::query_point(const Eigen::Vector<double,Dim> &referencePoint) const
+{
+    ShapeQuery<Dim> query;                                                                          // Data struct to be returned
+    
+    double mahalanobisDistance = sqrt(referencePoint.dot(_LLT.solve(referencePoint)));
+    
+    query.pointOnSurface = referencePoint / (mahalanobisDistance + 1e-12);
+    
+    query.translationVector = referencePoint - query.pointOnSurface;
+    
+    query.signedDistance = (mahalanobisDistance >= 1.0)
+                         ?  query.translationVector.norm()
+                         : -query.translationVector.norm();
+                         
+    query.unitVector = (query.signedDistance >= 0.0)
+                     ?  query.translationVector.normalized()
+                     : -query.translationVector.normalized();
+    
+    return query;
+}
         
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                       Get a point on the surface along a ray to the center                     //
