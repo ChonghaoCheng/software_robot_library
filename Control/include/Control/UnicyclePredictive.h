@@ -83,21 +83,15 @@ class UnicyclePredictive : public RobotLibrary::Control::UnicycleBase
         
         private:
         
-        double _obstaclePotentialScalar = 1e-03;                                                    ///< Determines magnitude of repulsive force
-        
-        double _controlBarrierScalar = 5.0;                                                         ///< Scales the control barrier function for obstacle avoidance
-        
-        double _threshold = 1e-10;                                                                  ///< Terminates algorithm early if this threshold is reached
+        double _obstaclePotentialScalar = 1e-01;                                                    ///< Determines magnitude of repulsive force
+
+        double _threshold = 1e-06;                                                                  ///< Terminates algorithm early if this threshold is reached
         
         unsigned int _predictionSteps;                                                              ///< Number of steps in the prediction horizon
         
         unsigned int _numberOfRecursions;                                                           ///< Number of backward + forward passes
- 
-        std::vector<double> _distanceToObstacle;                                                    ///< Kind of obvious.
-        
-        std::vector<Eigen::Matrix3d> _poseErrorWeight;                                              ///< Weighting matrix on the intermediate pose error
 
-        std::vector<Eigen::Vector2d> _unitVector;                                                   ///< Used to reduce step size in direction of obstacles
+        std::vector<Eigen::Matrix3d> _poseErrorWeight;                                              ///< Weighting matrix on the intermediate pose error
   
         std::vector<RobotLibrary::Model::UnicycleState> _predictedStates;                           ///< Pose, velocity, and covariance over the prediction horizon
 

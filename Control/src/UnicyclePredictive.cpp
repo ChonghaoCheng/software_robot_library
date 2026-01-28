@@ -102,6 +102,16 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
     using namespace Eigen;
     using namespace RobotLibrary::Model;
     
+    // Global scope
+    double goldenRatio = (1.0 + sqrt(5.0)) / 2.0;
+    double roundingError = 1e-12;                                                                   // Used to avoid dividing by zero
+    double obstaclePotentialScalar = _obstaclePotentialScalar;                                      // So we can modify it
+    unsigned int currentNumberOfRewinds = 0;
+    unsigned int totalNumberOfRewinds = 20;
+    
+    auto predictedStates = _predictedStates;                                                        // Copy this so we can modify it
+    auto previousPredictedStates = predictedStates;                                                 // Lagged copy for re-starting
+    
     // Ensure inputs are sound
     if (desiredStates.size() != _predictionSteps + 1)
     {
@@ -121,10 +131,10 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
     // Run the optimisation
     for (int i = 0; i < _numberOfRecursions; ++i)
     { 
-        double largestStepChange = 0.0;                                                             // Store largest step change in control for this recursion
-
-        double potentialDivisor = 1.0 * i + 1.0;                                                    // Shrinks potential function with each iteration
-        
+        // Local scope
+        bool   rewindNeeded      = false; 
+        double largestStepChange = 0.0;                                                             // Store largest step change in control for this recursio
+        double potentialDivisor  = goldenRatio * (i+1);                                             // Shrinks potential function with each iteration
         Vector3d lagrangeMultipliers;                                                               // This equivalent to a wrench for SE(2)
         
         // Backwards recursions
@@ -132,8 +142,7 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
         {
             if (j == _predictionSteps)                                                              // i.e final configuration
             {
-                Pose2D currentPose = _predictedStates[j].pose;                                      // This just makes code shorter
-                
+                Pose2D currentPose = predictedStates[j].pose;                                       // This just makes code shorter
                 Vector3d potentialGradient = -_poseErrorWeight[j] * currentPose.error(desiredStates[j].pose); // NOTE: Force is -K * e = dP/dx
                 
                 // Compute force from all obstacles
@@ -141,80 +150,92 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
                 {
                     Vector2d currentPosition = currentPose.translation();                           // For brevity
                     
-                    Vector2d pointOnSurface = obstacles[j][k].point_on_surface(currentPosition);    // This is not necessarily the closest point
+                    auto query = obstacles[j][k].query_point(currentPosition);                      // Check for distance, etc.
                     
-                    Vector2d translation = currentPosition - pointOnSurface;                        // Translation FROM the surface TO the robot
-                    
-                    double distance = translation.norm() - _minimumSafeDistance;                    // Subtract safe distance
+                    double distance = query.signedDistance - _minimumSafeDistance;                  // Subtract safe distance
    
                     if (distance < 0.0)
                     {
-                        throw std::runtime_error("[ERROR] [UNICYCLE PREDICTIVE CONTROL] track_trajectory(): "
-                                                 "Collision detected on prediction step " + std::to_string(j+1) + " "
-                                                 "with obstacle " + std::to_string(k+1) + ".");
+                        if (i > 0 and currentNumberOfRewinds < totalNumberOfRewinds)
+                        {
+                            rewindNeeded = true;
+                            break;                                                                  // Break k loop
+                        }
+                        else
+                        {
+                            throw std::runtime_error("[ERROR] [UNICYCLE PREDICTIVE CONTROL] track_trajectory(): "
+                                                     "Collision detected with '" + obstacles[j][k].name() + "' "
+                                                     "on prediction step " + std::to_string(j+1) + ".");
+                        }
                     }
-
-                    /**************************** Harmonic ***************************************/
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
-                                               * translation / (pow(distance,2.0) + 1e-08);
+                    
+                    /**************************** Harmonic ****************************************/
+                    potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
+                                               * query.translationVector / (pow(distance,2.0) + roundingError);
                     /******************************************************************************/
                     
                     /****************************** NON Harmonic **********************************
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
-                                               * translation / (pow(distance,3.0) + 1e-06);
+                    potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
+                                               * query.translationVector / (pow(distance,3.0) + roundingError);
                     /*******************************************************************************/
                 }
+                
+                if (rewindNeeded) break;                                                            // Break j loop
 
                 lagrangeMultipliers = -potentialGradient;                                           // This is a force vector              
             }
             else
             {
                 // Variables used in this scope
-                double angle               = _predictedStates[j].pose.angle();                      // Makes code shorter
-                Pose2D currentPose         = _predictedStates[j].pose;
-                Pose2D nextPose            = _predictedStates[j+1].pose;
-                Vector2d currentVelocity   = _predictedStates[j].velocity;
+                unsigned int numObstacles  = obstacles[j+1].size();                                 // Makes referencing a little easier
+                double angle               = predictedStates[j].pose.angle();                       // Makes code shorter
+                Pose2D currentPose         = predictedStates[j].pose;
+                Pose2D nextPose            = predictedStates[j+1].pose;
+                Vector2d currentVelocity   = predictedStates[j].velocity;
                 Matrix3d potentialHessian  = _poseErrorWeight[j];                                   // i.e. stiffness matrix K
                 Vector3d potentialGradient = -potentialHessian * nextPose.error(desiredStates[j+1].pose); // Error at NEXT step, K * e[j+1]
-                
-                // Add up effects from obstacles
-                _distanceToObstacle.resize(obstacles[j+1].size());                                  // We need this to enforce obstacle constraints
-                _unitVector.resize(obstacles[j+1].size());                                          // We need this to enforce obstacle constraints
-                
-                for (int k = 0; k < obstacles[j+1].size(); ++k)
+
+                // Add up effect of obstacles
+                for (int k = 0; k < numObstacles; ++k)
                 {
-                    Vector2d robotPosition     = nextPose.translation();
-                    Vector2d pointOnSurface    = obstacles[j+1][k].point_on_surface(robotPosition);
-                    Vector2d translationVector = robotPosition - pointOnSurface;
-                    _distanceToObstacle[k]     = translationVector.norm() - _minimumSafeDistance;
-                    _unitVector[k]             = translationVector.normalized();
-
-                    if (_distanceToObstacle[k] < 0.0)
-                    {           
-                        throw std::runtime_error("[ERROR] [UNICYCLE PREDICTIVE CONTROL] track_trajectory(): "
-                                                 "Collision detected with '" + obstacles[j+1][k].name() + "' obstacle "
-                                                 " on prediction step " + std::to_string(j+1) + ".");
-                    }
+                    auto query = obstacles[j+1][k].query_point(nextPose.translation());
                     
-                    /******************************** Harmonic ************************************/
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
-                                               * translationVector / (pow(_distanceToObstacle[k],2.0) + 1e-08);
+                    double distance = query.signedDistance - _minimumSafeDistance;
 
-                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / (potentialDivisor * (pow(_distanceToObstacle[k],2.0) + 1e-08)))
-                                                     * ( 2.0 * (translationVector * translationVector.transpose()) / (pow(_distanceToObstacle[k],2.0) + 1e-08)   - Matrix2d::Identity());
+                    if (distance < 0.0)
+                    {           
+                        if (i > 0 and currentNumberOfRewinds < totalNumberOfRewinds)
+                        {
+                            rewindNeeded = true;
+                            break;                                                                  // Break k loop
+                        }
+                        else
+                        {
+                            throw std::runtime_error("[ERROR] [UNICYCLE PREDICTIVE CONTROL] track_trajectory(): "
+                                                     "Collision detected with obstacle '" + obstacles[j+1][k].name() + "' "
+                                                     "on prediction step " + std::to_string(j+1) + ".");
+                        }
+                    }
+                  
+                    /******************************** Harmonic ************************************/
+                    potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
+                                               *  query.translationVector / (pow(distance,2.0) + roundingError);
+
+                    potentialHessian.block(0,0,2,2) += (obstaclePotentialScalar / (potentialDivisor * (pow(distance,2.0) + roundingError)))
+                                                     * ( 2.0 * (query.translationVector * query.translationVector.transpose()) / (pow(distance,2.0) + roundingError)   - Matrix2d::Identity());
                     /*******************************************************************************/
 
                     /******************************** NON Harmonic ********************************
-                    potentialGradient.head(2) -= (_obstaclePotentialScalar / potentialDivisor)
-                                               * translationVector / (pow(_distanceToObstacle[k],3.0) + 1e-06);
+                    potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
+                                               * query.translationVector / (pow(distance,3.0) + roundingError);
 
-                    potentialHessian.block(0,0,2,2) += (_obstaclePotentialScalar / (potentialDivisor * (pow(_distanceToObstacle[k],3.0) + 1e-06)))
-                                                     * ( 3.0 * (translationVector * translationVector.transpose()) / (pow(_distanceToObstacle[k],2.0) + 1e-06)   - Matrix2d::Identity());
+                    potentialHessian.block(0,0,2,2) += (obstaclePotentialScalar / (potentialDivisor * (pow(distance,3.0) + roundingError)))
+                                                     * ( 3.0 * (query.translationVector * query.translationVector.transpose()) / (pow(distance,2.0) + roundingError) - Matrix2d::Identity());
                     /*******************************************************************************/
                 }
                 
-                // Compute Newton step and update control input u
-                
+                if (rewindNeeded) break;                                                            // Break j-loop
+                  
                 Vector3d temp = potentialGradient - lagrangeMultipliers;                            // Need this in a couple of places below
                 
                 Matrix<double,3,3> dfdx = configuration_jacobian(currentPose, currentVelocity, _controlFrequency); // Partial derivative of kinematics w.r.t configuration x
@@ -222,7 +243,7 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
                 Matrix<double,3,2> dfdu = control_jacobian(currentPose, _controlFrequency);         // Partial derivative of kinematics w.r.t. control input u
                 dfdu(2,1) = 1.0;                                                                    // NOTE: This works better for some reason???
                 
-                Vector<double,2> dLdu = -_inertiaMatrix * (desiredStates[j].velocity - _predictedStates[j].velocity) + dfdu.transpose() * temp; // Partial derivative of Lagrangian w.r.t. configuration x
+                Vector<double,2> dLdu = -_inertiaMatrix * (desiredStates[j].velocity - predictedStates[j].velocity) + dfdu.transpose() * temp; // Partial derivative of Lagrangian w.r.t. configuration x
               
                 Matrix<double,2,3> d2Ldudx = dfdu.transpose() * potentialHessian * dfdx;            // Mixed partial derivatives of Lagrangian w.r.t. control u, configuration x
                 d2Ldudx(0,2) += (temp[0] * sin(angle) - temp[1] * cos(angle)) / _controlFrequency;  // This is d^2f/dudx^T * (dp/dx - lambda[i+1])
@@ -231,8 +252,8 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
                 
                 // NOTE: This somehow prevents obstacle collision,
                 // but it can't be too small, or too large
-                d2Ldu2(0,0) += 1e-06;
-                d2Ldu2(1,1) += 1e-06;
+                d2Ldu2(0,0) += 1e-08;
+                d2Ldu2(1,1) += 1e-08;
                 
                 Vector3d dx = currentPose.error(desiredStates[j].pose);
                 
@@ -250,29 +271,39 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
                 
                 if (norm > largestStepChange) largestStepChange = norm;
                 
-                _predictedStates[j].velocity += du;                                                 // Update velocity
+                predictedStates[j].velocity += du;                                                  // Update velocity
 
                 lagrangeMultipliers = -potentialGradient + dfdx.transpose() * lagrangeMultipliers;  // Accrue forces
             }
         }
         
+        if (rewindNeeded)
+        {   
+            obstaclePotentialScalar *=  goldenRatio;                                                // Increase potential
+            ++currentNumberOfRewinds;                                                               // Increment counter
+            predictedStates = previousPredictedStates;                                              // Go back to last solution
+            continue;                                                                               // Go back to start if i-loop
+        }
+        
         // Forward recursions
         for (int j = 0; j < _predictionSteps; ++j)
         {       
-            _predictedStates[j+1].pose =
-            RobotLibrary::Model::Unicycle::predicted_pose(_predictedStates[j].pose,
-                                                                   _predictedStates[j].velocity,
-                                                                   _controlFrequency);
+            predictedStates[j+1].pose =
+            RobotLibrary::Model::Unicycle::predicted_pose(predictedStates[j].pose,
+                                                          predictedStates[j].velocity,
+                                                          _controlFrequency);
                                               
-            _predictedStates[j+1].covariance =
-            RobotLibrary::Model::Unicycle::predicted_covariance(_predictedStates[j].pose,
-                                                                         _predictedStates[j].velocity,
-                                                                         _predictedStates[j].covariance,
-                                                                         _controlFrequency);
+            predictedStates[j+1].covariance =
+            RobotLibrary::Model::Unicycle::predicted_covariance(predictedStates[j].pose,
+                                                                predictedStates[j].velocity,
+                                                                predictedStates[j].covariance,
+                                                                _controlFrequency);
         }
         
         if (largestStepChange < _threshold) break;
     }
+    
+    _predictedStates = predictedStates;                                                             // Save solution
     
     return _predictedStates[0].velocity;                                                            // Only return the 1sts
 }
