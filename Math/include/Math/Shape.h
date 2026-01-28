@@ -19,6 +19,8 @@
 #ifndef SHAPE_H
 #define SHAPE_H
 
+#include <Math/DataStructures.h>
+
 #include <Eigen/Dense>
 
 namespace RobotLibrary { namespace Math {
@@ -45,6 +47,15 @@ class Shape
         virtual
         VectorType
         point_on_surface(const VectorType &referencePoint) const = 0;
+        
+        /**
+         * @brief Query the geometry of a point relative to this shape.
+         * @param referencePoint Used for computing properties.
+         * @return A data structure containg signed distance, translation vector, etc.
+         */
+        virtual
+        ShapeQuery<Dim>
+        query_point(const VectorType &referencePoint) const = 0;
         
         /**
          * @brief Get the type of shape.
