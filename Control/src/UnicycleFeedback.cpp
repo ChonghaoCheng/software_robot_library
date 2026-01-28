@@ -128,10 +128,9 @@ UnicycleFeedback::compute_barrier_constraints(const RobotLibrary::Model::Unicycl
 
     Vector2d robotPosition = state.pose.translation();
 
-    Vector2d displacement = robotPosition - obstacle.point_on_surface(robotPosition);               //(nearest?) point on surace
- 
-    double distance = displacement.norm() - _minimumSafeDistance;                                   // Magnitude of the distance
-
+    RobotLibrary::Math::ShapeQuery query = obstacle.query_point(robotPosition);
+    
+    double distance = query.signedDistance - _minimumSafeDistance;                                  // Subtract for added safety
 
     if (distance < 0.0)
     {
@@ -144,17 +143,17 @@ UnicycleFeedback::compute_barrier_constraints(const RobotLibrary::Model::Unicycl
     
     Vector2d heading(cos(angle), sin(angle));                                                       // A unit vector
     
-    double projection = heading.dot(displacement.normalized());                                     // If > 0, then robot is heading toward obstacle
+    double projection = heading.dot(query.unitVector);                                              // NOTE: This is negative if the robot is facing the obstacle
     
     // Set up row vector for constraint matrix
     Eigen::Vector2d rowVector;
     rowVector[0] = projection;
     rowVector[1] = 0.0;
     
-    double gamma = 2.5; // NEED TO RE-EXAMINE THIS?
+    double gamma = 10.0; // NEED TO RE-EXAMINE THIS?
     
     return RobotLibrary::Control::BarrierConstraints{ gamma * distance,
-                                                     -rowVector};
+                                                      rowVector};
 }
 
 } } // Namespace                                                                                      
