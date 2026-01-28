@@ -45,6 +45,14 @@ class Obstacle2D : public RigidBody2D
                    const std::string &name = "");
 
         /**
+         * @brief Get useful geometric information for collision avoidance.
+         * @param referencePoint An external reference point.
+         * @return A data structure (see Math/include/Math/DataStructures.h)
+         */
+        RobotLibrary::Math::ShapeQuery<2>
+        query_point(const Eigen::Vector2d &referencePoint) const;
+        
+        /**
          * @brief Get a point on the surface of the obstacle.
          * @note May not be the actual closest point, depending on the underlying shape.
          * @param referencePoint An external point used in the computation.
