@@ -59,7 +59,7 @@ UnicyclePredictive::UnicyclePredictive(RobotLibrary::Model::UnicycleParameters &
     // Generate gain matrices so that M[N-1] == M, and K[N-1] = K
     double a = controlParameters.exponent;
         
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i <= N; ++i)
     {
         double s = (1.0 / N) + (1.0 - (1.0 / N)) * (1.0 - std::exp(-a * (i / (N - 1.0)))) / (1.0 - std::exp(-a));
         
@@ -90,6 +90,24 @@ UnicyclePredictive::update_state(const RobotLibrary::Model::Pose2D &pose,
     {
         _predictedStates[i] = _predictedStates[i+1];
     }
+    
+    // Decelerate from the second last step
+    double v  = _predictedStates[_predictionSteps-2].velocity[0];
+    double dv = _maxLinearAcceleration * _controlFrequency;
+    
+    if (v >= 0) _predictedStates[_predictionSteps-1].velocity[0] = (v <  dv) ? 0.0 : v - dv;
+    else        _predictedStates[_predictionSteps-1].velocity[0] = (v > -dv) ? 0.0 : v + dv;
+    
+    double w  = _predictedStates[_predictionSteps-2].velocity[1];
+    double dw = _maxAngularAcceleration * _controlFrequency;
+    
+    if (w >= 0) _predictedStates[_predictionSteps-1].velocity[1] = (w <  dw) ? 0.0 : w - dw;
+    else        _predictedStates[_predictionSteps-1].velocity[1] = (w > -dw) ? 0.0 : w + dw;
+    
+    _predictedStates.back().pose =
+    RobotLibrary::Model::Unicycle::predicted_pose(_predictedStates[_predictionSteps-1].pose,
+                                                  _predictedStates[_predictionSteps-1].velocity,
+                                                  _controlFrequency);
 } 
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
