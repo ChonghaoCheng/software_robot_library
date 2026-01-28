@@ -153,7 +153,7 @@ UnicycleFeedback::compute_barrier_constraints(const RobotLibrary::Model::Unicycl
     double gamma = 10.0; // NEED TO RE-EXAMINE THIS?
     
     return RobotLibrary::Control::BarrierConstraints{ gamma * distance,
-                                                      rowVector};
+                                                     -rowVector};
 }
 
 } } // Namespace                                                                                      
