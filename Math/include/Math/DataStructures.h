@@ -33,7 +33,7 @@ struct FunctionPoint
 };   
 
 /**
- * A data structure for holding the results of the QR decomposition.
+ * @brief A data structure for holding the results of the QR decomposition.
  */
 struct QRDecomposition
 {
@@ -41,6 +41,18 @@ struct QRDecomposition
      Eigen::MatrixXd R;                                                                             ///< An upper-triangular matrix 
                                                                  
 };   
+
+/**
+ * @brief A data structure for checking points inside / outside a shape.
+ */
+template <unsigned int Dim>
+struct ShapeQuery
+{
+    double signedDistance;                                                                          ///< Check if we're inside or out
+    Eigen::Vector<double, Dim> pointOnSurface;                                                      ///< Self explanatory
+    Eigen::Vector<double, Dim> translationVector;                                                   ///< From surface to a queried point
+    Eigen::Vector<double, Dim> unitVector;                                                          ///< Translation vector, normalised, pointing outward
+};
 
 } } // namespace
                      
