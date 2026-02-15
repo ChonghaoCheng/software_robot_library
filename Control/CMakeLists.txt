@@ -3,6 +3,8 @@
 add_library(Control src/SerialLinkBase.cpp
                     src/SerialLinkImpedance.cpp
                     src/SerialLinkKinematic.cpp
+                    src/SerialLinkMPC.cpp
+                    src/SerialLinkMPCC.cpp
 )
 
 # Specify targets to be built

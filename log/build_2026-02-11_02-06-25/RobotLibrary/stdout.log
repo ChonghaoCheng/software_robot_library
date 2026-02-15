@@ -1,0 +1,85 @@
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Build type: Release
+-- Found the QPSolver class in /home/eric/Workspace/software_robot_library/Math/include/Math/
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/eric/Workspace/software_robot_library/build/RobotLibrary
+[  4%] [32mBuilding CXX object Math/CMakeFiles/Math.dir/src/MathFunctions.cpp.o[0m
+[  8%] [32mBuilding CXX object Math/CMakeFiles/Math.dir/src/SkewSymmetric.cpp.o[0m
+[ 12%] [32mBuilding CXX object Math/CMakeFiles/Math.dir/src/Polynomial.cpp.o[0m
+[ 16%] [32mBuilding CXX object Math/CMakeFiles/Math.dir/src/Spline.cpp.o[0m
+[ 20%] [32m[1mLinking CXX static library libMath.a[0m
+[ 20%] Built target Math
+[ 37%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/tinyxml2.cpp.o[0m
+[ 37%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Joint.cpp.o[0m
+[ 37%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Link.cpp.o[0m
+[ 37%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Pose2D.cpp.o[0m
+[ 41%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/KinematicTree.cpp.o[0m
+[ 45%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Pose.cpp.o[0m
+[ 50%] [32mBuilding CXX object Model/CMakeFiles/Model.dir/src/RigidBody.cpp.o[0m
+[ 54%] [32m[1mLinking CXX static library libModel.a[0m
+[ 54%] Built target Model
+[ 70%] [32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/SplineTrajectory.cpp.o[0m
+[ 70%] [32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/TrajectoryBase.cpp.o[0m
+[ 70%] [32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkKinematic.cpp.o[0m
+[ 70%] [32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkMPCC.cpp.o[0m
+[ 75%] [32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/TrapezoidalVelocity.cpp.o[0m
+[ 91%] [32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/MinimumArcLength.cpp.o[0m
+[ 91%] [32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkImpedance.cpp.o[0m
+[ 91%] [32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkBase.cpp.o[0m
+[ 91%] [32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/CartesianSpline.cpp.o[0m
+[ 95%] [32m[1mLinking CXX static library libTrajectory.a[0m
+[ 95%] Built target Trajectory
+[100%] [32m[1mLinking CXX static library libControl.a[0m
+[100%] Built target Control
+-- Install configuration: "Release"
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libControl.a
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkMPCC.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/DataStructures.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkBase.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkImpedance.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkKinematic.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkMPC.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libMath.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/MathFunctions.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/Spline.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/DataStructures.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/Polynomial.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/QPSolver.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/SkewSymmetric.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libModel.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/DataStructures.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Pose.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/KinematicTree.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Link.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/tinyxml2.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Joint.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Pose2D.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/RigidBody.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libTrajectory.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/CartesianSpline.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/DataStructures.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/SplineTrajectory.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/TrapezoidalVelocity.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/MinimumArcLength.h
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/TrajectoryBase.h
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libControl.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libMath.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libModel.a
+-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libTrajectory.a
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryConfig.cmake
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryTargets.cmake
+-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryTargets-release.cmake

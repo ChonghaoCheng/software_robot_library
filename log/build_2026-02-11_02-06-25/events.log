@@ -1,0 +1,214 @@
+[0.000000] (-) TimerEvent: {}
+[0.000381] (RobotLibrary) JobQueued: {'identifier': 'RobotLibrary', 'dependencies': OrderedDict()}
+[0.000401] (RobotLibrary) JobStarted: {'identifier': 'RobotLibrary'}
+[0.005130] (RobotLibrary) JobProgress: {'identifier': 'RobotLibrary', 'progress': 'cmake'}
+[0.005357] (RobotLibrary) Command: {'cmd': ['/usr/bin/cmake', '/home/eric/Workspace/software_robot_library', '-DCMAKE_INSTALL_PREFIX=/home/eric/Workspace/software_robot_library/install/RobotLibrary'], 'cwd': '/home/eric/Workspace/software_robot_library/build/RobotLibrary', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('LANGUAGE', 'en_AU:en'), ('USER', 'eric'), ('LC_TIME', 'en_AU.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/mujoco/mujoco-3.3.7/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/mujoco/mujoco-3.3.7/bin'), ('HOME', '/home/eric'), ('CONDA_SHLVL', '0'), ('OLDPWD', '/home/eric'), ('DESKTOP_SESSION', 'ubuntu'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'en_AU.UTF-8'), ('MANAGERPID', '23759'), ('SYSTEMD_EXEC_PID', '24360'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '1387409'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'eric'), ('JOURNAL_STREAM', '8:207087'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'eric'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/home/eric/micromamba/condabin:/opt/ros/humble/bin:/home/eric/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/eric-MS-7E61:@/tmp/.ICE-unix/24113,unix/eric-MS-7E61:/tmp/.ICE-unix/24113'), ('INVOCATION_ID', 'f9961ce885d14234a00d6d9ea227bba3'), ('PAPERSIZE', 'a4'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'en_AU.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('MUJOCO_PY_MUJOCO_PATH', '/opt/mujoco/mujoco-3.3.7'), ('MAMBA_ROOT_PREFIX', '/home/eric/micromamba'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_AU.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'en_AU.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('ROS_DOMAIN_ID', '30'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'en_AU.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:b90be449-7f56-44e9-bd9b-2e54535d52af'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'en_AU.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('MAMBA_EXE', '/home/eric/.local/bin/micromamba'), ('LC_IDENTIFICATION', 'en_AU.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/eric/Workspace/software_robot_library/build/RobotLibrary'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'en_AU.UTF-8'), ('LC_PAPER', 'en_AU.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800')]), 'shell': False}
+[0.033459] (RobotLibrary) StdoutLine: {'line': b'-- The CXX compiler identification is GNU 11.4.0\n'}
+[0.036212] (RobotLibrary) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info\n'}
+[0.065625] (RobotLibrary) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info - done\n'}
+[0.068646] (RobotLibrary) StdoutLine: {'line': b'-- Check for working CXX compiler: /usr/bin/c++ - skipped\n'}
+[0.068767] (RobotLibrary) StdoutLine: {'line': b'-- Detecting CXX compile features\n'}
+[0.068965] (RobotLibrary) StdoutLine: {'line': b'-- Detecting CXX compile features - done\n'}
+[0.069211] (RobotLibrary) StdoutLine: {'line': b'-- Build type: Release\n'}
+[0.071605] (RobotLibrary) StdoutLine: {'line': b'-- Found the QPSolver class in /home/eric/Workspace/software_robot_library/Math/include/Math/\n'}
+[0.072876] (RobotLibrary) StdoutLine: {'line': b'-- Configuring done\n'}
+[0.076290] (RobotLibrary) StdoutLine: {'line': b'-- Generating done\n'}
+[0.077519] (RobotLibrary) StdoutLine: {'line': b'-- Build files have been written to: /home/eric/Workspace/software_robot_library/build/RobotLibrary\n'}
+[0.079506] (RobotLibrary) CommandEnded: {'returncode': 0}
+[0.079818] (RobotLibrary) JobProgress: {'identifier': 'RobotLibrary', 'progress': 'build'}
+[0.080232] (RobotLibrary) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/eric/Workspace/software_robot_library/build/RobotLibrary', '--', '-j32', '-l32'], 'cwd': '/home/eric/Workspace/software_robot_library/build/RobotLibrary', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('LANGUAGE', 'en_AU:en'), ('USER', 'eric'), ('LC_TIME', 'en_AU.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/mujoco/mujoco-3.3.7/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/mujoco/mujoco-3.3.7/bin'), ('HOME', '/home/eric'), ('CONDA_SHLVL', '0'), ('OLDPWD', '/home/eric'), ('DESKTOP_SESSION', 'ubuntu'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'en_AU.UTF-8'), ('MANAGERPID', '23759'), ('SYSTEMD_EXEC_PID', '24360'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '1387409'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'eric'), ('JOURNAL_STREAM', '8:207087'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'eric'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/home/eric/micromamba/condabin:/opt/ros/humble/bin:/home/eric/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/eric-MS-7E61:@/tmp/.ICE-unix/24113,unix/eric-MS-7E61:/tmp/.ICE-unix/24113'), ('INVOCATION_ID', 'f9961ce885d14234a00d6d9ea227bba3'), ('PAPERSIZE', 'a4'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'en_AU.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('MUJOCO_PY_MUJOCO_PATH', '/opt/mujoco/mujoco-3.3.7'), ('MAMBA_ROOT_PREFIX', '/home/eric/micromamba'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_AU.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'en_AU.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('ROS_DOMAIN_ID', '30'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'en_AU.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:b90be449-7f56-44e9-bd9b-2e54535d52af'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'en_AU.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('MAMBA_EXE', '/home/eric/.local/bin/micromamba'), ('LC_IDENTIFICATION', 'en_AU.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/eric/Workspace/software_robot_library/build/RobotLibrary'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'en_AU.UTF-8'), ('LC_PAPER', 'en_AU.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800')]), 'shell': False}
+[0.098198] (RobotLibrary) StdoutLine: {'line': b'[  4%] \x1b[32mBuilding CXX object Math/CMakeFiles/Math.dir/src/MathFunctions.cpp.o\x1b[0m\n'}
+[0.098274] (RobotLibrary) StdoutLine: {'line': b'[  8%] \x1b[32mBuilding CXX object Math/CMakeFiles/Math.dir/src/SkewSymmetric.cpp.o\x1b[0m\n'}
+[0.098313] (RobotLibrary) StdoutLine: {'line': b'[ 12%] \x1b[32mBuilding CXX object Math/CMakeFiles/Math.dir/src/Polynomial.cpp.o\x1b[0m\n'}
+[0.098637] (RobotLibrary) StdoutLine: {'line': b'[ 16%] \x1b[32mBuilding CXX object Math/CMakeFiles/Math.dir/src/Spline.cpp.o\x1b[0m\n'}
+[0.099832] (-) TimerEvent: {}
+[0.200018] (-) TimerEvent: {}
+[0.300342] (-) TimerEvent: {}
+[0.400626] (-) TimerEvent: {}
+[0.500970] (-) TimerEvent: {}
+[0.601272] (-) TimerEvent: {}
+[0.701585] (-) TimerEvent: {}
+[0.801871] (-) TimerEvent: {}
+[0.902174] (-) TimerEvent: {}
+[1.002475] (-) TimerEvent: {}
+[1.102855] (-) TimerEvent: {}
+[1.203123] (-) TimerEvent: {}
+[1.303401] (-) TimerEvent: {}
+[1.403716] (-) TimerEvent: {}
+[1.503947] (-) TimerEvent: {}
+[1.604176] (-) TimerEvent: {}
+[1.704396] (-) TimerEvent: {}
+[1.804671] (-) TimerEvent: {}
+[1.905007] (-) TimerEvent: {}
+[2.005263] (-) TimerEvent: {}
+[2.105500] (-) TimerEvent: {}
+[2.205766] (-) TimerEvent: {}
+[2.306059] (-) TimerEvent: {}
+[2.347682] (RobotLibrary) StdoutLine: {'line': b'[ 20%] \x1b[32m\x1b[1mLinking CXX static library libMath.a\x1b[0m\n'}
+[2.360209] (RobotLibrary) StdoutLine: {'line': b'[ 20%] Built target Math\n'}
+[2.368289] (RobotLibrary) StdoutLine: {'line': b'[ 37%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/tinyxml2.cpp.o\x1b[0m\n'}
+[2.368482] (RobotLibrary) StdoutLine: {'line': b'[ 37%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Joint.cpp.o\x1b[0m\n'}
+[2.368518] (RobotLibrary) StdoutLine: {'line': b'[ 37%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Link.cpp.o\x1b[0m\n'}
+[2.368545] (RobotLibrary) StdoutLine: {'line': b'[ 37%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Pose2D.cpp.o\x1b[0m\n'}
+[2.368568] (RobotLibrary) StdoutLine: {'line': b'[ 41%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/KinematicTree.cpp.o\x1b[0m\n'}
+[2.368591] (RobotLibrary) StdoutLine: {'line': b'[ 45%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/Pose.cpp.o\x1b[0m\n'}
+[2.368613] (RobotLibrary) StdoutLine: {'line': b'[ 50%] \x1b[32mBuilding CXX object Model/CMakeFiles/Model.dir/src/RigidBody.cpp.o\x1b[0m\n'}
+[2.406153] (-) TimerEvent: {}
+[2.506426] (-) TimerEvent: {}
+[2.606720] (-) TimerEvent: {}
+[2.706997] (-) TimerEvent: {}
+[2.807313] (-) TimerEvent: {}
+[2.907696] (-) TimerEvent: {}
+[3.007966] (-) TimerEvent: {}
+[3.108219] (-) TimerEvent: {}
+[3.208506] (-) TimerEvent: {}
+[3.308728] (-) TimerEvent: {}
+[3.408981] (-) TimerEvent: {}
+[3.509277] (-) TimerEvent: {}
+[3.609553] (-) TimerEvent: {}
+[3.709839] (-) TimerEvent: {}
+[3.810098] (-) TimerEvent: {}
+[3.910356] (-) TimerEvent: {}
+[4.010605] (-) TimerEvent: {}
+[4.110878] (-) TimerEvent: {}
+[4.211197] (-) TimerEvent: {}
+[4.311474] (-) TimerEvent: {}
+[4.411754] (-) TimerEvent: {}
+[4.512038] (-) TimerEvent: {}
+[4.612304] (-) TimerEvent: {}
+[4.712585] (-) TimerEvent: {}
+[4.812884] (-) TimerEvent: {}
+[4.913155] (-) TimerEvent: {}
+[5.013435] (-) TimerEvent: {}
+[5.113741] (-) TimerEvent: {}
+[5.214087] (-) TimerEvent: {}
+[5.314335] (-) TimerEvent: {}
+[5.330391] (RobotLibrary) StdoutLine: {'line': b'[ 54%] \x1b[32m\x1b[1mLinking CXX static library libModel.a\x1b[0m\n'}
+[5.343553] (RobotLibrary) StdoutLine: {'line': b'[ 54%] Built target Model\n'}
+[5.352833] (RobotLibrary) StdoutLine: {'line': b'[ 70%] \x1b[32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/SplineTrajectory.cpp.o\x1b[0m\n'}
+[5.353038] (RobotLibrary) StdoutLine: {'line': b'[ 70%] \x1b[32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/TrajectoryBase.cpp.o\x1b[0m\n'}
+[5.353067] (RobotLibrary) StdoutLine: {'line': b'[ 70%] \x1b[32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkKinematic.cpp.o\x1b[0m\n'}
+[5.353089] (RobotLibrary) StdoutLine: {'line': b'[ 70%] \x1b[32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkMPCC.cpp.o\x1b[0m\n'}
+[5.353109] (RobotLibrary) StdoutLine: {'line': b'[ 75%] \x1b[32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/TrapezoidalVelocity.cpp.o\x1b[0m\n'}
+[5.353301] (RobotLibrary) StdoutLine: {'line': b'[ 91%] \x1b[32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/MinimumArcLength.cpp.o\x1b[0m\n'}
+[5.353408] (RobotLibrary) StdoutLine: {'line': b'[ 91%] \x1b[32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkImpedance.cpp.o\x1b[0m\n'}
+[5.353444] (RobotLibrary) StdoutLine: {'line': b'[ 91%] \x1b[32mBuilding CXX object Control/CMakeFiles/Control.dir/src/SerialLinkBase.cpp.o\x1b[0m\n'}
+[5.353463] (RobotLibrary) StdoutLine: {'line': b'[ 91%] \x1b[32mBuilding CXX object Trajectory/CMakeFiles/Trajectory.dir/src/CartesianSpline.cpp.o\x1b[0m\n'}
+[5.414449] (-) TimerEvent: {}
+[5.514771] (-) TimerEvent: {}
+[5.615075] (-) TimerEvent: {}
+[5.715373] (-) TimerEvent: {}
+[5.815672] (-) TimerEvent: {}
+[5.915965] (-) TimerEvent: {}
+[6.016255] (-) TimerEvent: {}
+[6.055952] (RobotLibrary) StdoutLine: {'line': b'[ 95%] \x1b[32m\x1b[1mLinking CXX static library libTrajectory.a\x1b[0m\n'}
+[6.069540] (RobotLibrary) StdoutLine: {'line': b'[ 95%] Built target Trajectory\n'}
+[6.116304] (-) TimerEvent: {}
+[6.216457] (-) TimerEvent: {}
+[6.316622] (-) TimerEvent: {}
+[6.416796] (-) TimerEvent: {}
+[6.516920] (-) TimerEvent: {}
+[6.617053] (-) TimerEvent: {}
+[6.717241] (-) TimerEvent: {}
+[6.817386] (-) TimerEvent: {}
+[6.917529] (-) TimerEvent: {}
+[7.017712] (-) TimerEvent: {}
+[7.117896] (-) TimerEvent: {}
+[7.218080] (-) TimerEvent: {}
+[7.318230] (-) TimerEvent: {}
+[7.418360] (-) TimerEvent: {}
+[7.518515] (-) TimerEvent: {}
+[7.618659] (-) TimerEvent: {}
+[7.718806] (-) TimerEvent: {}
+[7.818920] (-) TimerEvent: {}
+[7.919038] (-) TimerEvent: {}
+[8.019178] (-) TimerEvent: {}
+[8.119345] (-) TimerEvent: {}
+[8.219501] (-) TimerEvent: {}
+[8.319665] (-) TimerEvent: {}
+[8.419855] (-) TimerEvent: {}
+[8.520010] (-) TimerEvent: {}
+[8.620182] (-) TimerEvent: {}
+[8.720379] (-) TimerEvent: {}
+[8.820554] (-) TimerEvent: {}
+[8.920723] (-) TimerEvent: {}
+[9.020898] (-) TimerEvent: {}
+[9.121083] (-) TimerEvent: {}
+[9.221292] (-) TimerEvent: {}
+[9.321447] (-) TimerEvent: {}
+[9.421600] (-) TimerEvent: {}
+[9.521775] (-) TimerEvent: {}
+[9.621938] (-) TimerEvent: {}
+[9.722119] (-) TimerEvent: {}
+[9.822272] (-) TimerEvent: {}
+[9.922389] (-) TimerEvent: {}
+[10.022535] (-) TimerEvent: {}
+[10.122704] (-) TimerEvent: {}
+[10.222899] (-) TimerEvent: {}
+[10.323089] (-) TimerEvent: {}
+[10.423266] (-) TimerEvent: {}
+[10.523396] (-) TimerEvent: {}
+[10.623525] (-) TimerEvent: {}
+[10.723711] (-) TimerEvent: {}
+[10.823874] (-) TimerEvent: {}
+[10.924005] (-) TimerEvent: {}
+[11.024180] (-) TimerEvent: {}
+[11.124334] (-) TimerEvent: {}
+[11.224477] (-) TimerEvent: {}
+[11.324654] (-) TimerEvent: {}
+[11.424790] (-) TimerEvent: {}
+[11.524920] (-) TimerEvent: {}
+[11.542782] (RobotLibrary) StdoutLine: {'line': b'[100%] \x1b[32m\x1b[1mLinking CXX static library libControl.a\x1b[0m\n'}
+[11.556561] (RobotLibrary) StdoutLine: {'line': b'[100%] Built target Control\n'}
+[11.560737] (RobotLibrary) CommandEnded: {'returncode': 0}
+[11.561085] (RobotLibrary) JobProgress: {'identifier': 'RobotLibrary', 'progress': 'install'}
+[11.564470] (RobotLibrary) Command: {'cmd': ['/usr/bin/cmake', '--install', '/home/eric/Workspace/software_robot_library/build/RobotLibrary'], 'cwd': '/home/eric/Workspace/software_robot_library/build/RobotLibrary', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('LANGUAGE', 'en_AU:en'), ('USER', 'eric'), ('LC_TIME', 'en_AU.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/mujoco/mujoco-3.3.7/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/mujoco/mujoco-3.3.7/bin'), ('HOME', '/home/eric'), ('CONDA_SHLVL', '0'), ('OLDPWD', '/home/eric'), ('DESKTOP_SESSION', 'ubuntu'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'en_AU.UTF-8'), ('MANAGERPID', '23759'), ('SYSTEMD_EXEC_PID', '24360'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '1387409'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'eric'), ('JOURNAL_STREAM', '8:207087'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'eric'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/home/eric/micromamba/condabin:/opt/ros/humble/bin:/home/eric/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/eric-MS-7E61:@/tmp/.ICE-unix/24113,unix/eric-MS-7E61:/tmp/.ICE-unix/24113'), ('INVOCATION_ID', 'f9961ce885d14234a00d6d9ea227bba3'), ('PAPERSIZE', 'a4'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'en_AU.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('MUJOCO_PY_MUJOCO_PATH', '/opt/mujoco/mujoco-3.3.7'), ('MAMBA_ROOT_PREFIX', '/home/eric/micromamba'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_AU.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'en_AU.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('ROS_DOMAIN_ID', '30'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'en_AU.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:b90be449-7f56-44e9-bd9b-2e54535d52af'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'en_AU.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('MAMBA_EXE', '/home/eric/.local/bin/micromamba'), ('LC_IDENTIFICATION', 'en_AU.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/eric/Workspace/software_robot_library/build/RobotLibrary'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'en_AU.UTF-8'), ('LC_PAPER', 'en_AU.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800')]), 'shell': False}
+[11.567238] (RobotLibrary) StdoutLine: {'line': b'-- Install configuration: "Release"\n'}
+[11.567340] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libControl.a\n'}
+[11.567634] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/\n'}
+[11.567675] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control\n'}
+[11.567717] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkMPCC.h\n'}
+[11.567740] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/DataStructures.h\n'}
+[11.567777] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkBase.h\n'}
+[11.567799] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkImpedance.h\n'}
+[11.567839] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkKinematic.h\n'}
+[11.567860] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary//Control/SerialLinkMPC.h\n'}
+[11.567893] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libMath.a\n'}
+[11.567987] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary\n'}
+[11.568010] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math\n'}
+[11.568046] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/MathFunctions.h\n'}
+[11.568085] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/Spline.h\n'}
+[11.568106] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/DataStructures.h\n'}
+[11.568125] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/Polynomial.h\n'}
+[11.568162] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/QPSolver.h\n'}
+[11.568181] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Math/SkewSymmetric.h\n'}
+[11.568214] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libModel.a\n'}
+[11.568351] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary\n'}
+[11.568390] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model\n'}
+[11.568412] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/DataStructures.h\n'}
+[11.568450] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Pose.h\n'}
+[11.568473] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/KinematicTree.h\n'}
+[11.568492] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Link.h\n'}
+[11.568527] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/tinyxml2.h\n'}
+[11.568546] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Joint.h\n'}
+[11.568580] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/Pose2D.h\n'}
+[11.568617] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Model/RigidBody.h\n'}
+[11.568665] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libTrajectory.a\n'}
+[11.568741] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary\n'}
+[11.568780] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory\n'}
+[11.568802] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/CartesianSpline.h\n'}
+[11.568838] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/DataStructures.h\n'}
+[11.568858] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/SplineTrajectory.h\n'}
+[11.568877] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/TrapezoidalVelocity.h\n'}
+[11.568910] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/MinimumArcLength.h\n'}
+[11.568956] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/include/RobotLibrary/Trajectory/TrajectoryBase.h\n'}
+[11.568975] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libControl.a\n'}
+[11.568994] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libMath.a\n'}
+[11.569012] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libModel.a\n'}
+[11.569031] (RobotLibrary) StdoutLine: {'line': b'-- Up-to-date: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/libTrajectory.a\n'}
+[11.569050] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryConfig.cmake\n'}
+[11.569082] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryTargets.cmake\n'}
+[11.569117] (RobotLibrary) StdoutLine: {'line': b'-- Installing: /home/eric/Workspace/software_robot_library/install/RobotLibrary/lib/cmake/RobotLibrary/RobotLibraryTargets-release.cmake\n'}
+[11.569649] (RobotLibrary) CommandEnded: {'returncode': 0}
+[11.576419] (RobotLibrary) JobEnded: {'identifier': 'RobotLibrary', 'rc': 0}
+[11.576741] (-) EventReactorShutdown: {}

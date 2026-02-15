@@ -1,0 +1,6 @@
+Invoking command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary': /usr/bin/cmake /home/eric/Workspace/software_robot_library -DCMAKE_INSTALL_PREFIX=/home/eric/Workspace/software_robot_library/install/RobotLibrary
+Invoked command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary' returned '0': /usr/bin/cmake /home/eric/Workspace/software_robot_library -DCMAKE_INSTALL_PREFIX=/home/eric/Workspace/software_robot_library/install/RobotLibrary
+Invoking command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary': /usr/bin/cmake --build /home/eric/Workspace/software_robot_library/build/RobotLibrary -- -j32 -l32
+Invoked command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary' returned '0': /usr/bin/cmake --build /home/eric/Workspace/software_robot_library/build/RobotLibrary -- -j32 -l32
+Invoking command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary': /usr/bin/cmake --install /home/eric/Workspace/software_robot_library/build/RobotLibrary
+Invoked command in '/home/eric/Workspace/software_robot_library/build/RobotLibrary' returned '0': /usr/bin/cmake --install /home/eric/Workspace/software_robot_library/build/RobotLibrary

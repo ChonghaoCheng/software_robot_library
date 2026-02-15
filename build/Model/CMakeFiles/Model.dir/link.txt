@@ -1,0 +1,2 @@
+/usr/bin/ar qc libModel.a CMakeFiles/Model.dir/src/Joint.cpp.o CMakeFiles/Model.dir/src/KinematicTree.cpp.o CMakeFiles/Model.dir/src/Link.cpp.o CMakeFiles/Model.dir/src/Pose.cpp.o CMakeFiles/Model.dir/src/Pose2D.cpp.o CMakeFiles/Model.dir/src/RigidBody.cpp.o CMakeFiles/Model.dir/src/tinyxml2.cpp.o
+/usr/bin/ranlib libModel.a
