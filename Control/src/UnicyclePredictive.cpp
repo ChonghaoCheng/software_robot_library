@@ -191,7 +191,7 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
                     potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
                                                * query.translationVector / (pow(distance,2.0) + roundingError);
                     /******************************************************************************/
-                    
+                   
                     /****************************** NON Harmonic **********************************
                     potentialGradient.head(2) -= (obstaclePotentialScalar / potentialDivisor)
                                                * query.translationVector / (pow(distance,3.0) + roundingError);
