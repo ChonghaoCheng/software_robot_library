@@ -46,7 +46,8 @@ class MinimumArcLength : public TrajectoryBase
  		 MinimumArcLength(const RobotLibrary::Model::Pose2D &startPose,
  		                  const Eigen::Vector2d &endPoint,
  		                  const double &startTime,
- 		                  const double &endTime);
+ 		                  const double &endTime,
+ 		                  const Eigen::Vector2d &startVelocity = {0.0, 0.0});
 		
 		/**
 		 * @brief Get the desired pose (x, y, \psi) and velocity (v, \omega) for the given time.

@@ -30,7 +30,8 @@ namespace RobotLibrary { namespace Trajectory {
 MinimumArcLength::MinimumArcLength(const RobotLibrary::Model::Pose2D &startPose,
  		                           const Eigen::Vector2d &endPoint,
  		                           const double &startTime,
- 		                           const double &endTime)
+ 		                           const double &endTime,
+ 		                           const Eigen::Vector2d &startVelocity)
 : _initialPose(startPose)
 {
 	if (startTime == endTime)
@@ -54,7 +55,6 @@ MinimumArcLength::MinimumArcLength(const RobotLibrary::Model::Pose2D &startPose,
 
     RobotLibrary::Math::FunctionPoint startValues, endValues;
     startValues.value            = 0.0;                                                             // Always start from zero, in either case
-    startValues.firstDerivative  = 0.0;                                                             // Velocity at start is zero
     startValues.secondDerivative = 0.0;                                                             // Acceleration at start is zero
     endValues.firstDerivative    = 0.0;                                                             // Velocity at end is zero
     endValues.secondDerivative   = 0.0;                                                             // Acceleration at end is zero
@@ -64,9 +64,10 @@ MinimumArcLength::MinimumArcLength(const RobotLibrary::Model::Pose2D &startPose,
     // Generate the trajectory based on whether we follow curve or straight line
     if (abs(theta) < 1e-03)
     {
-        _straightLine     = true;
-        endValues.value   = r;                                                                      // Use the radius parameter
-        finalLocalHeading = 0.0;
+        _straightLine               = true;
+        startValues.firstDerivative = startVelocity[0];
+        endValues.value             = r;                                                            // Use the radius parameter
+        finalLocalHeading           = 0.0;
     }
     else                                                                                            // Form curved path
     {
@@ -79,14 +80,16 @@ MinimumArcLength::MinimumArcLength(const RobotLibrary::Model::Pose2D &startPose,
         _c1 = r / (2 * sinh(theta));                                                                // Need the absolute angle to prevent sign flips?
         _c2 = -_c1;
         
+        startValues.firstDerivative = startVelocity[0] / (2 * _c1);                                 
+        
         double dr = _c1 * exp(theta) - _c2 * exp(-theta);
-        double dx = dr * cos(theta) - r * sin(theta);
-        double dy = dr * sin(theta) + r * cos(theta);
+        double dx =  dr * cos(theta) - r * sin(theta);
+        double dy =  dr * sin(theta) + r * cos(theta);
 
         finalLocalHeading = atan2(dy * _directionChange, dx * _directionChange);                    // Here theta is a substitute for omega so we get the correct sign
     }
     
-     _polynomial = RobotLibrary::Math::Polynomial(startValues, endValues, startTime, endTime, 5);   // Create quintic polynomial
+     _polynomial = RobotLibrary::Math::Polynomial(startValues, endValues, startTime, endTime, 3);   // Create quintic polynomial
      
      // Resize values now for the state
      _state.position.resize(3);                                                                     // Save as x, y, \psi
