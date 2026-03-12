@@ -63,7 +63,7 @@ UnicycleFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &desiredPos
     
     // Pose error in the GLOBAL frame
     Vector3d e = _pose.error(desiredPose);
-    
+   
     // Position error in the LOCAL frame
     double epsilon_x =  e[0] * cos(_pose.angle()) + e[1] * sin(_pose.angle());
     double epsilon_y = -e[0] * sin(_pose.angle()) + e[1] * cos(_pose.angle());
@@ -73,7 +73,7 @@ UnicycleFeedback::track_trajectory(const RobotLibrary::Model::Pose2D &desiredPos
     //  subject to: B * u <= z
     // Hessian H == M, and f == - M * u_d
                            
-    Vector2d f = { -_mass *    (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
+    Vector2d f = { -_mass    * (desiredVelocity[0] * cos(e[2]) + _xPositionGain * epsilon_x), 
                    -_inertia * (desiredVelocity[1] + desiredVelocity[0] * epsilon_y + _yPositionGain * epsilon_y + _orientationGain * sin(e[2])) };
     
     // Compute speed limits
