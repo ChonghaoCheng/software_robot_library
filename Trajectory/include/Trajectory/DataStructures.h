@@ -18,13 +18,13 @@
 #define TRAJECTORY_DATA_STRUCTS_H
 
 #include <Model/Pose.h>
-
+#include <Model/Pose2D.h>
 #include <Eigen/Core>                                                                               // Eigen::VectorXd
  
 namespace RobotLibrary { namespace Trajectory {
  
 /**
- * @brief A data structure for returning state information from functions.
+ * @brief A data structure for SE(3)
  */
 struct CartesianState
 {
@@ -43,6 +43,16 @@ struct State
      Eigen::VectorXd velocity;
      Eigen::VectorXd acceleration;
 };                                                                                                  // Semicolon needed after struct declaration
+
+/**
+ * @brief A data structure for SE(2) robots
+ */
+struct PlanarState
+{
+    RobotLibrary::Model::Pose2D pose;
+    Eigen::Vector<double,3> twist;
+    Eigen::Vector<double,3> acceleration;
+};
 
 } } // namespace
 
