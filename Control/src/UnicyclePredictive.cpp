@@ -122,7 +122,7 @@ UnicyclePredictive::track_trajectory(const std::vector<RobotLibrary::Model::Unic
     
     // Global scope
     double goldenRatio = (1.0 + sqrt(5.0)) / 2.0;
-    double roundingError = 1e-12;                                                                   // Used to avoid dividing by zero
+    double roundingError = 1e-08;                                                                   // Used to avoid dividing by zero
     double obstaclePotentialScalar = _obstaclePotentialScalar;                                      // So we can modify it
     unsigned int currentNumberOfRewinds = 0;
     unsigned int totalNumberOfRewinds = 20;
