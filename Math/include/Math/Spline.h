@@ -36,12 +36,12 @@ class Spline
         
         /**
          * @brief Constructor.
-         * @param values The RobotLibrary::Math::Polynomial value, and its first and second derivatives at the given points.
+         * @param values The RobotLibrary::Math::FunctionPoint value, and its first and second derivatives at the given points.
          * @param points The corresponding independent variable for the spline values.
          */
         Spline(const std::vector<RobotLibrary::Math::FunctionPoint> &values,
-               const std::vector<double>        &points,
-               const unsigned int               &order = 3);
+               const std::vector<double> &points,
+               const unsigned int &order = 3);
                
         /**
          * @brief Query the spline values & derivatives for the given point.
