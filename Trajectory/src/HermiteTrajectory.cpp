@@ -47,37 +47,46 @@ HermiteTrajectory::HermiteTrajectory(const RobotLibrary::Model::Pose2D &startPos
     using namespace RobotLibrary::Math;                                                             // For brevity
     using namespace RobotLibrary::Trajectory;
     
+    double angle     = startPose.angle();
+    double velocity  = startTwist[0] * cos(angle) + startTwist[1] * sin(angle);
+    double curvature = startTwist[2] / (velocity + 1e-12);
+    
     // Set up the x-position spline
     FunctionPoint xStart;
-    xStart.value           = startPose.translation()[0];
-    xStart.firstDerivative = cos(startPose.angle());
+    xStart.value            = startPose.translation()[0];
+    xStart.firstDerivative  = cos(angle);
+    xStart.secondDerivative = - curvature * sin(angle);
     
     FunctionPoint xEnd;
-    xEnd.value           = endPose.translation()[0];
-    xEnd.firstDerivative = cos(endPose.angle());
+    xEnd.value            = endPose.translation()[0];
+    xEnd.firstDerivative  = cos(endPose.angle());
+    xEnd.secondDerivative = 0.0;
     
     _xSpline = Polynomial(xStart, xEnd, 0.0, 1.0, 5);                                               // Cubic polynomial
     
     // Set up the y-position spline
     FunctionPoint yStart;
-    yStart.value           = startPose.translation()[1];
-    yStart.firstDerivative = sin(startPose.angle());
+    yStart.value            = startPose.translation()[1];
+    yStart.firstDerivative  = sin(angle);
+    yStart.secondDerivative = curvature * cos(angle);
     
     FunctionPoint yEnd;
-    yEnd.value           = endPose.translation()[1];
-    yEnd.firstDerivative = sin(endPose.angle());
+    yEnd.value            = endPose.translation()[1];
+    yEnd.firstDerivative  = sin(endPose.angle());
+    yEnd.secondDerivative = 0.0;
     
     _ySpline = Polynomial(yStart, yEnd, 0.0, 1.0, 5);                                               // Cubic polynomial
 
     // Set up the arc length trajectory
     FunctionPoint arcParameterStart;
-    arcParameterStart.value           = 0.0;
-    arcParameterStart.firstDerivative = _startTwist[0] * cos(startPose.angle()) + _startTwist[1] * sin(startPose.angle())
-                                      / sqrt(xStart.firstDerivative * xStart.firstDerivative + yStart.firstDerivative * yStart.firstDerivative); // ds/dt = v (m/s)
+    arcParameterStart.value            = 0.0;
+    arcParameterStart.firstDerivative  = velocity;
+    arcParameterStart.secondDerivative = 0.0;
     
     FunctionPoint arcParameterEnd;
-    arcParameterEnd.value           = 1.0;
-    arcParameterEnd.firstDerivative = 0.0; 
+    arcParameterEnd.value            = 1.0;
+    arcParameterEnd.firstDerivative  = 0.0;
+    arcParameterEnd.secondDerivative = 0.0;
     
     _arcParameterTrajectory = Polynomial(arcParameterStart, arcParameterEnd, startTime, endTime, 5); // Quintic polynomial function of time?
 }
