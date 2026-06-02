@@ -252,6 +252,8 @@ KinematicTree::KinematicTree(const std::string &pathToURDF)
                     
                     for (auto childLink : currentLink.child_links())                                // Cycle through all the child links
                     {
+                         // Preserve the fixed transform when removing this link from the active chain.
+                         childLink->joint().extend_origin(currentLink.joint().origin());
                          childLink->clear_parent_link();                                            // Link has been merged, so sever the connection
                     }
                }

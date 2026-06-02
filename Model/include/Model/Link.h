@@ -83,8 +83,15 @@ class Link : public RobotLibrary::Model::RigidBody
           /**
            * @brief Returns the RobotLibrary::Model::Joint object associated with this link.
            */
+          RobotLibrary::Model::Joint&
+          joint() { return this->_joint; }
+
+          /**
+           * @brief Returns the RobotLibrary::Model::Joint object associated with this link.
+           */
           RobotLibrary::Model::Joint 
           joint() const { return this->_joint; }
+          
           
           /**
            * @brief Returns a pointer to the previous joint in the kinematic chain.
