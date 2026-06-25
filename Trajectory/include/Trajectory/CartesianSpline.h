@@ -66,16 +66,50 @@ class CartesianSpline
                         startTwist) {}
         /**
          * @brief Get the state for the given time.
-         */               
+         */
         RobotLibrary::Trajectory::CartesianState
         query_state(const double &time);
-        
+
+        /**
+         * @brief As it says.
+         */
+        double
+        start_time() const { return _spline.start_time(); }
+
         /**
          * @brief As it says.
          */
         double
         end_time() const { return _spline.end_time(); }
-        
+
+        // ----- Unified path-progress geometric interface (for progress-owning controllers) -----
+
+        /**
+         * @brief Map a normalised progress s in [0,1] to trajectory time (linear: s * end_time()).
+         * @param progress Normalised progress in [0,1].
+         * @return The corresponding trajectory time.
+         */
+        double
+        progress_to_time(const double &progress) const;
+
+        /**
+         * @brief The reference pose at a normalised progress s in [0,1].
+         * @param progress Normalised progress in [0,1].
+         */
+        RobotLibrary::Model::Pose
+        pose_at_progress(const double &progress);
+
+        /**
+         * @brief Body-frame SE(3) tangent of the path with respect to normalised progress.
+         * @details tau(s) = se3_log( T(s)^-1 T(s+ds) ) / ds, a 6D body twist. This is the
+         *          intrinsic path geometry consumed by contouring controllers (MPCC / RMPCC),
+         *          so they no longer re-derive it themselves.
+         * @param progress Normalised progress in [0,1].
+         * @param step Finite-difference step in progress.
+         */
+        Eigen::Matrix<double,6,1>
+        tangent_at_progress(const double &progress, const double &step = 1e-3);
+
     private:
         
         RobotLibrary::Trajectory::SplineTrajectory _spline;                                         ///< Underlying trajectory over real numbers

@@ -91,7 +91,31 @@ solve_cubic_spline_derivatives(const std::vector<double> &y,
  */
 double
 wrap_to_pi(const double &angle);
-            
+
+/**
+ * @brief Logarithmic map of SO(3): a rotation matrix to a rotation vector (angle * axis).
+ * @param R A 3x3 rotation matrix.
+ * @return The rotation vector in R^3.
+ */
+Eigen::Vector3d
+so3_logarithm(const Eigen::Matrix3d &R);
+
+/**
+ * @brief Logarithmic map of SE(3): a homogeneous transform to a body twist.
+ * @param T A 4x4 homogeneous transform.
+ * @return The body twist [v; w] in R^6 with the [vx vy vz wx wy wz] ordering.
+ */
+Eigen::Matrix<double,6,1>
+se3_logarithm(const Eigen::Matrix4d &T);
+
+/**
+ * @brief Inverse of a homogeneous SE(3) transform (uses the block structure, not a generic inverse).
+ * @param T A 4x4 homogeneous transform.
+ * @return The inverse transform.
+ */
+Eigen::Matrix4d
+se3_inverse(const Eigen::Matrix4d &T);
+
 } }
-                     
-#endif                                    
+
+#endif

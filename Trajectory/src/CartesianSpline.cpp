@@ -18,6 +18,9 @@
  */
  
 #include <Trajectory/CartesianSpline.h>
+#include <Math/MathFunctions.h>
+
+#include <algorithm>
 
 namespace RobotLibrary { namespace Trajectory {
 
@@ -86,8 +89,56 @@ CartesianSpline::query_state(const double &time)
     }
 
     RobotLibrary::Trajectory::CartesianState returnValue = {pose, state.velocity, state.acceleration};   // Put them together in data structur
-    
+
     return returnValue;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                       Map normalised progress s in [0,1] to trajectory time                     //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+double
+CartesianSpline::progress_to_time(const double &progress) const
+{
+    const double s = std::clamp(progress, 0.0, 1.0);
+    return start_time() + s * (end_time() - start_time());                                           // Linear mapping
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                             Reference pose at a normalised progress                             //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+RobotLibrary::Model::Pose
+CartesianSpline::pose_at_progress(const double &progress)
+{
+    return this->query_state(progress_to_time(progress)).pose;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                       Body-frame SE(3) tangent w.r.t. normalised progress                       //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix<double,6,1>
+CartesianSpline::tangent_at_progress(const double &progress, const double &step)
+{
+    const double s0    = std::clamp(progress, 0.0, 1.0);
+    const double s1    = std::clamp(s0 + step, 0.0, 1.0);
+    const double sPrev = std::clamp(s0 - step, 0.0, 1.0);
+
+    double denominator = s1 - s0;
+    Eigen::Matrix4d T0 = pose_at_progress(s0).as_matrix();
+    Eigen::Matrix4d T1;
+    if(denominator > 1e-9)
+    {
+        T1 = pose_at_progress(s1).as_matrix();                                                       // Forward difference
+    }
+    else
+    {
+        denominator = s0 - sPrev;                                                                    // At the upper end, use a backward difference
+        T1 = T0;
+        T0 = pose_at_progress(sPrev).as_matrix();
+    }
+
+    if(denominator <= 1e-9) return Eigen::Matrix<double,6,1>::Zero();
+
+    return RobotLibrary::Math::se3_logarithm(RobotLibrary::Math::se3_inverse(T0) * T1) / denominator;
 }
 
 } } // namespace

@@ -18,6 +18,9 @@
  */
  
 #include <Math/MathFunctions.h>
+#include <Math/SkewSymmetric.h>
+
+#include <cmath>
 
 namespace RobotLibrary { namespace Math {
 
@@ -272,10 +275,69 @@ double
 wrap_to_pi(const double &angle)
 {
     double newAngle = fmod(angle + M_PI, 2 * M_PI);
-    
+
     if(newAngle < 0) newAngle += 2 * M_PI;
-    
+
     return newAngle - M_PI;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                            Logarithmic map of SO(3): R -> rotation vector                       //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Vector3d
+so3_logarithm(const Eigen::Matrix3d &R)
+{
+    Eigen::Quaterniond q(R);
+    q.normalize();
+    if(q.w() < 0.0) q.coeffs() *= -1.0;                                                             // Shortest path
+
+    const Eigen::Vector3d vector = q.vec();
+    const double vectorNorm = vector.norm();
+    if(not std::isfinite(vectorNorm) or vectorNorm < 1e-10) return Eigen::Vector3d::Zero();
+
+    const double angle = 2.0 * std::atan2(vectorNorm, q.w());
+    return angle * vector / vectorNorm;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                            Logarithmic map of SE(3): T -> body twist                            //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix<double,6,1>
+se3_logarithm(const Eigen::Matrix4d &T)
+{
+    Eigen::Matrix<double,6,1> twist = Eigen::Matrix<double,6,1>::Zero();
+    const Eigen::Matrix3d R = T.block<3,3>(0,0);
+    const Eigen::Vector3d p = T.block<3,1>(0,3);
+    const Eigen::Vector3d w = so3_logarithm(R);
+    const double theta = w.norm();
+
+    Eigen::Matrix3d Vinv = Eigen::Matrix3d::Identity();
+    if(theta > 1e-10)
+    {
+        const Eigen::Matrix3d W = SkewSymmetric(w).as_matrix();
+        const double theta2 = theta * theta;
+        const double coeff = 1.0 / theta2 - (1.0 + std::cos(theta)) / (2.0 * theta * std::sin(theta));
+        Vinv -= 0.5 * W;
+        Vinv += coeff * W * W;
+    }
+
+    twist.head<3>() = Vinv * p;
+    twist.tail<3>() = w;
+    return twist;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                              Inverse of a homogeneous SE(3) transform                           //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix4d
+se3_inverse(const Eigen::Matrix4d &T)
+{
+    Eigen::Matrix4d inverse = Eigen::Matrix4d::Identity();
+    const Eigen::Matrix3d R = T.block<3,3>(0,0);
+    const Eigen::Vector3d p = T.block<3,1>(0,3);
+    inverse.block<3,3>(0,0) = R.transpose();
+    inverse.block<3,1>(0,3) = -R.transpose() * p;
+    return inverse;
 }
 
 } }

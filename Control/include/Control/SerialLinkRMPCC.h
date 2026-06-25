@@ -1,0 +1,271 @@
+/**
+ * @file    SerialLinkRMPCC.h
+ * @brief   Riemannian MPCC controller for serial link robot arms.
+ *
+ * @details This class implements a Riemannian Model Predictive Contouring Control
+ *          (RMPCC) formulation directly on SE(3). Unlike SerialLinkMPCC (which is
+ *          fed a single desired pose every tick and assumes a locally straight path),
+ *          SerialLinkRMPCC OWNS the reference trajectory and its own path progress,
+ *          so the prediction horizon can look ahead along the real path curvature.
+ *
+ *          State / error:   e = log_SE3( T_ref(s)^{-1} T ) in R^6  (body twist)
+ *          Control:         u in R^6 body twist + scalar progress rate sdot
+ *          Decision vector: z = [u_1..u_N, sdot_1..sdot_N] in R^{7N}
+ *          Prediction:      e_j ~= e_0 + dt * sum_{i<=j} ( u_i - tau(s_i) * sdot_i )
+ *
+ *          The first 6 dims of the optimal control are converted to a base-frame
+ *          spatial velocity via the SE(3) adjoint and turned into joint velocities
+ *          with an internal SerialLinkKinematic.
+ *
+ *          A constant (rigid) workspace disturbance D is supported via
+ *          set_disturbance(): T_active(s) = D * T_ref(s). For a rigid D the body
+ *          tangent tau(s) is invariant, so D only shifts the initial error e_0.
+ */
+
+#ifndef SERIAL_LINK_RMPCC_H
+#define SERIAL_LINK_RMPCC_H
+
+#include <Control/SerialLinkBase.h>
+#include <Control/SerialLinkKinematic.h>
+#include <Trajectory/CartesianSpline.h>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <memory>
+
+namespace RobotLibrary { namespace Control {
+
+/**
+ * @brief Tuning parameters for the Riemannian MPCC controller.
+ *
+ * Pure Eigen/POD struct with no ROS dependency. A front-end (e.g. a ROS action
+ * server) fills it from configuration and passes it to the constructor, so the
+ * controller stays runtime-tunable without hard-coding weights in the library.
+ */
+struct RmpccParameters
+{
+    RmpccParameters() = default;
+
+    static constexpr int TWIST_DIM = 6;
+
+    // Horizon / progress
+    int    horizonSteps              = 12;       ///< Prediction horizon length N
+    double terminalMultiplier        = 2.2;      ///< Extra weight on the last horizon stage
+    bool   autoProgressRate          = true;     ///< Derive progressRateRef from trajectory duration
+    double progressRateRef           = 0.0;      ///< Nominal progress rate sdot_ref (1/s)
+    double autoProgressRateMin       = 0.0;      ///< Clamp for the auto-derived sdot_ref
+    double autoProgressRateMax       = 1.15;     ///< Clamp for the auto-derived sdot_ref
+    double progressRateMin           = 0.0;      ///< Lower bound on sdot
+    double progressRateMax           = 0.0;      ///< Upper bound on sdot (0 => derive from ref)
+    double progressRateMaxMultiplier = 1.0;      ///< progressRateMax = ref * multiplier when not set
+    double progressUpperSlack        = 1e-4;     ///< Slack on the first-step terminal overrun constraint
+    double progressScheduleSlack     = 0.0;      ///< Slack on the optional wall-clock schedule limit
+    double completionTolerance       = 1e-3;     ///< Treat as "at the end" within this remaining progress
+
+    // Numerics
+    double tangentStep               = 1e-3;     ///< Finite-difference step for tau(s)
+    double hessianRegularization     = 1e-8;     ///< Tikhonov term added to the QP Hessian
+
+    // Progress shaping
+    double progressReward            = 0.01;     ///< Linear reward encouraging forward progress
+    double progressRateWeight        = 0.0;      ///< Quadratic tracking of sdot toward sdot_ref
+    double progressRateSmoothWeight  = 0.5;      ///< Penalises sdot changes between stages
+
+    // Riemannian tracking
+    double lagWeight                 = 80.0;     ///< Weight on the along-path (lag) error component
+    bool   poseFeedbackEnable        = true;     ///< Add an outer pose-feedback term to the body twist
+
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> poseFeedbackGain =
+        (Eigen::Vector<double, TWIST_DIM>() << 20.0, 20.0, 20.0, 5.0, 5.0, 5.0).finished().asDiagonal();
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> metric =
+        (Eigen::Vector<double, TWIST_DIM>() << 450.0, 450.0, 250.0, 10.0, 10.0, 10.0).finished().asDiagonal();
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> contourWeight =
+        (Eigen::Vector<double, TWIST_DIM>() << 600.0, 600.0, 350.0, 600.0, 600.0, 350.0).finished().asDiagonal();
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> controlWeight =
+        1e-5 * Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity();
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> controlRateWeight =
+        1e-5 * Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity();
+    Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> pathVelocityWeight =
+        1e-5 * Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity();
+
+    Eigen::Vector3d linearVelocityMax  = Eigen::Vector3d(1.45, 0.34, 0.28);
+    Eigen::Vector3d angularVelocityMax = Eigen::Vector3d(0.90, 0.90, 1.10);
+};
+
+/**
+ * @brief Per-step diagnostics produced by a SerialLinkRMPCC control step.
+ */
+struct RmpccDiagnostics
+{
+    Eigen::Vector<double, 6> bodyTwist   = Eigen::Vector<double, 6>::Zero(); ///< Optimal first body twist u_1
+    double progressRate          = 0.0;  ///< Optimal first progress rate sdot_1
+    double pathProgress          = 0.0;  ///< Current owned progress s
+    double se3ErrorNorm          = 0.0;  ///< ||e_0|| (mixed units, diagnostic only)
+    double contourError          = 0.0;  ///< Norm of the contour (perpendicular) error component
+    double lagError              = 0.0;  ///< Signed lag (along-path) error component
+    double rotationError         = 0.0;  ///< Rotation error magnitude (rad)
+    double referenceLinearSpeed  = 0.0;  ///< |tau_lin| * sdot_ref
+    double referenceAngularSpeed = 0.0;  ///< |tau_ang| * sdot_ref
+    double qpStatus              = 1.0;  ///< 1 = solver succeeded, 0 = fallback used
+    bool   fallbackUsed          = false;///< True when the QP solve failed and warm start was reused
+};
+
+/**
+ * @brief Riemannian MPCC controller that owns its reference path and progress.
+ */
+class SerialLinkRMPCC : public SerialLinkBase
+{
+    public:
+        /**
+         * @brief Constructor.
+         * @param model        Kinematic tree model.
+         * @param endpointName Name of the endpoint frame.
+         * @param parameters   Shared SerialLinkBase parameters (gains, QP solver options).
+         * @param rmpcc        RMPCC-specific tuning parameters.
+         */
+        SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
+                        const std::string &endpointName,
+                        const RobotLibrary::Control::SerialLinkParameters &parameters = SerialLinkParameters(),
+                        const RmpccParameters &rmpcc = RmpccParameters());
+
+        // ----- SerialLinkBase interface: delegated to the inner kinematic controller -----
+
+        Eigen::VectorXd
+        resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion) override;
+
+        Eigen::VectorXd
+        resolve_endpoint_twist(const Eigen::Vector<double,6> &twist) override;
+
+        /**
+         * @brief Single-pose tracking fallback (delegates to the inner kinematic controller).
+         *        RMPCC trajectory tracking should use set_trajectory() + step() instead.
+         */
+        Eigen::VectorXd
+        track_endpoint_trajectory(const RobotLibrary::Model::Pose &desiredPose,
+                                  const Eigen::Vector<double,6>   &desiredVelocity,
+                                  const Eigen::Vector<double,6>   &desiredAcceleration) override;
+
+        Eigen::VectorXd
+        track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
+                               const Eigen::VectorXd &desiredVelocity,
+                               const Eigen::VectorXd &desiredAcceleration) override;
+
+        // ----- RMPCC-specific API (Option A: controller owns the path) -----
+
+        /**
+         * @brief Set the reference path and reset progress/warm-start state.
+         *        When autoProgressRate is enabled, derives sdot_ref from the duration.
+         */
+        void
+        set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory);
+
+        /**
+         * @brief Set the current rigid workspace disturbance D (base frame). Default identity.
+         *        T_active(s) = D * T_ref(s). Only shifts the initial error for rigid D.
+         */
+        void
+        set_disturbance(const Eigen::Matrix4d &disturbance);
+
+        /**
+         * @brief Optional wall-clock schedule limit: the first step may not advance
+         *        progress beyond this value (+ slack). Pass 1.0 to disable.
+         */
+        void
+        set_schedule_limit(double scheduleProgressLimit);
+
+        /**
+         * @brief Reset owned progress, warm start and rate memory (call on a new goal).
+         */
+        void
+        reset();
+
+        /**
+         * @brief Current owned path progress s in [0, 1].
+         */
+        double
+        path_progress() const { return _pathProgress; }
+
+        /**
+         * @brief Reference pose at a given progress, with the current disturbance applied.
+         *        Non-const because CartesianSpline::query_state() mutates spline cache state.
+         */
+        RobotLibrary::Model::Pose
+        reference_pose(double progress);
+
+        /**
+         * @brief Run one RMPCC control step and return the joint velocity command.
+         * @param dt Time since the previous step [s].
+         */
+        Eigen::VectorXd
+        step(double dt);
+
+        /**
+         * @brief Diagnostics from the most recent step().
+         */
+        const RmpccDiagnostics&
+        diagnostics() const { return _diagnostics; }
+
+    protected:
+        RobotLibrary::Model::Limits
+        compute_control_limits(const unsigned int &jointNumber) override;
+
+    private:
+        static constexpr int TWIST_DIM = 6;
+
+        RmpccParameters _rmpcc;
+
+        std::shared_ptr<SerialLinkKinematic> _innerKinematic;
+        QPSolver<double> _qpSolver;
+
+        RobotLibrary::Trajectory::CartesianSpline _trajectory;
+        bool _trajectorySet = false;
+
+        Eigen::Matrix4d _disturbance = Eigen::Matrix4d::Identity();
+        double _scheduleProgressLimit = 1.0;
+
+        // Owned MPCC state
+        double _pathProgress = 0.0;
+        double _lastProgressRate = 0.0;
+        Eigen::Vector<double, TWIST_DIM> _lastBodyTwist = Eigen::Vector<double, TWIST_DIM>::Zero();
+        Eigen::VectorXd _warmStart;
+
+        RmpccDiagnostics _diagnostics;
+
+        /**
+         * @brief Reference transform at a progress value, with disturbance applied.
+         *        Nominal path geometry comes from the trajectory; disturbance is applied here.
+         *        Non-const: queries the (mutable) spline cache.
+         */
+        Eigen::Matrix4d
+        reference_transform(double progress);
+
+        /**
+         * @brief Full reference body twist tau(s) * sdot_ref, using the trajectory's tangent.
+         */
+        Eigen::Vector<double, TWIST_DIM>
+        body_twist_reference_at_progress(double progress);
+
+        /**
+         * @brief Clip a warm-start vector to the box bounds and the first-step progress caps.
+         */
+        Eigen::VectorXd
+        clipped_warm_start(const Eigen::VectorXd &seed,
+                           const Eigen::VectorXd &lower,
+                           const Eigen::VectorXd &upper,
+                           double dt,
+                           double remaining,
+                           double scheduleRemaining) const;
+
+        /**
+         * @brief Build and solve the RMPCC QP; returns the optimal body twist and
+         *        progress rate, and fills _diagnostics.
+         * @param currentTransform Current endpoint pose as a 4x4 matrix.
+         * @param dt               Control step [s].
+         */
+        void
+        solve_rmpcc(const Eigen::Matrix4d &currentTransform, double dt);
+};
+
+} } // namespace
+
+#endif
