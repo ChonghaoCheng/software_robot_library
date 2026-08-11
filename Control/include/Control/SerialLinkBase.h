@@ -201,12 +201,12 @@ class SerialLinkBase : public QPSolver<double>
 		double _positionError = 0.0;                                                                ///< In meters
 				
 		Eigen::Matrix<double,6,6> _cartesianPoseGain =
-		(Eigen::Matrix<double,6,6>(6,6) << 10.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-		                                    0.0, 10.0,  0.0,  0.0,  0.0,  0.0,
-		                                    0.0,  0.0, 10.0,  0.0,  0.0,  0.0,
-		                                    0.0,  0.0,  0.0,  5.0,  0.0,  0.0,
-		                                    0.0,  0.0,  0.0,  0.0,  5.0,  0.0,
-		                                    0.0,  0.0,  0.0,  0.0,  0.0,  5.0).finished();          ///< Gain on the endpoint pose error
+		(Eigen::Matrix<double,6,6>(6,6) << 5.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+		                                    0.0, 5.0,  0.0,  0.0,  0.0,  0.0,
+		                                    0.0,  0.0, 5.0,  0.0,  0.0,  0.0,
+		                                    0.0,  0.0,  0.0,  3.0,  0.0,  0.0,
+		                                    0.0,  0.0,  0.0,  0.0,  3.0,  0.0,
+		                                    0.0,  0.0,  0.0,  0.0,  0.0,  3.0).finished();          ///< Gain on the endpoint pose error
 		
 		Eigen::Matrix<double,6,6> _cartesianVelocityGain = 0.5*_cartesianPoseGain;                  ///< Gain the endpoint velocity error
 		

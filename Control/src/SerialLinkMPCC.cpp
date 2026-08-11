@@ -4,82 +4,31 @@
  */
 
 #include <Control/SerialLinkMPCC.h>
+#include <Math/CondensedMPC.h>
+#include <Math/MathFunctions.h>
 
 #include <Eigen/Geometry>
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
+
+using RobotLibrary::Math::quaternion_to_rotation_vector;
 
 namespace RobotLibrary { namespace Control {
-
-Eigen::Vector3d
-SerialLinkMPCC::quaternion_orientation_error(const Eigen::Quaterniond &qCurrent,
-                                             const Eigen::Quaterniond &qRef)
-{
-    const double eps = 1e-8;
-    Eigen::Quaterniond qErr = qRef * qCurrent.conjugate();
-    qErr.normalize();
-
-    if (qErr.w() < 0.0)
-    {
-        qErr.coeffs() *= -1.0;
-    }
-
-    const Eigen::Vector3d v = qErr.vec();
-    const double vNorm = v.norm();
-
-    if (!std::isfinite(qErr.w()) || !v.allFinite())
-    {
-        return Eigen::Vector3d::Zero();
-    }
-
-    if (vNorm < eps)
-    {
-        return Eigen::Vector3d::Zero();
-    }
-
-    const double angle = 2.0 * std::atan2(vNorm, qErr.w());
-    const Eigen::Vector3d axis = v / vNorm;
-    return angle * axis;
-}
 
 SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
                                const std::string &endpointName,
                                const RobotLibrary::Control::SerialLinkParameters &parameters,
                                unsigned int horizon,
                                double dt)
-: SerialLinkBase(model, endpointName, parameters),
+: SerialLinkVelocityBase(model, endpointName, parameters),
   _horizon((horizon == 0) ? 1 : horizon),
   _dt((dt > 0.0) ? dt : 0.005),
-  _innerKinematic(std::make_shared<SerialLinkKinematic>(model, endpointName, parameters)),
   _qpSolver(parameters.qpsolver)
 {
-    // MPCC outer-loop rate fixed to 200 Hz as requested.
-    _controlFrequency = 200.0;
-    _dt = 1.0 / _controlFrequency;
-}
-
-Eigen::VectorXd
-SerialLinkMPCC::resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion)
-{
-    return _innerKinematic->resolve_endpoint_motion(endpointMotion);
-}
-
-Eigen::VectorXd
-SerialLinkMPCC::resolve_endpoint_twist(const Eigen::Vector<double,6> &twist)
-{
-    return _innerKinematic->resolve_endpoint_twist(twist);
-}
-
-Eigen::VectorXd
-SerialLinkMPCC::track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
-                                       const Eigen::VectorXd &desiredVelocity,
-                                       const Eigen::VectorXd &desiredAcceleration)
-{
-    return _innerKinematic->track_joint_trajectory(desiredPosition,
-                                                   desiredVelocity,
-                                                   desiredAcceleration);
+    _controlFrequency = 1.0 / _dt;
 }
 
 Eigen::VectorXd
@@ -87,288 +36,314 @@ SerialLinkMPCC::track_endpoint_trajectory(const RobotLibrary::Model::Pose &desir
                                           const Eigen::Vector<double,6> &desiredVelocity,
                                           const Eigen::Vector<double,6> &desiredAcceleration)
 {
+    (void)desiredPose;
+    (void)desiredVelocity;
     (void)desiredAcceleration;
 
+    throw std::logic_error(
+        "[ERROR] [SERIAL LINK MPCC] track_endpoint_trajectory(): "
+        "Single-pose tracking is not MPCC. Call set_trajectory() and then step(dt, estimatedProgress).");
+}
+
+void
+SerialLinkMPCC::set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory)
+{
+    const double duration = trajectory.end_time() - trajectory.start_time();
+    if(not std::isfinite(duration) or duration <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] set_trajectory(): Trajectory duration must be positive.");
+    }
+
+    _trajectory = trajectory;
+    _trajectorySet = true;
+    _pathProgress = 0.0;
+    _uLast.setZero();
+    _warmStart.resize(0);
+    _vProgressNominal = std::max(_vProgressMin, 1.0 / duration);
+    _vProgressMax = std::max(_vProgressMax, _vProgressNominal);
+}
+
+Eigen::VectorXd
+SerialLinkMPCC::step(const double dt, const double estimatedProgress)
+{
+    if(not _trajectorySet)
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK MPCC] step(): No trajectory set. Call set_trajectory() first.");
+    }
+    if(not std::isfinite(dt) or dt <= 0.0)
+    {
+        throw std::invalid_argument("[ERROR] [SERIAL LINK MPCC] step(): dt must be positive.");
+    }
+    if(not std::isfinite(estimatedProgress))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] step(): estimatedProgress must be finite.");
+    }
+
+    _dt = dt;
+    _pathProgress = std::clamp(estimatedProgress, 0.0, 1.0);
     update();
 
-    // Build local frame T0 at the current desired pose.
-    const Eigen::Vector3d pRef = desiredPose.translation();
-    const Eigen::Matrix3d RRef = desiredPose.quaternion().toRotationMatrix();
-    const Eigen::Matrix3d RTW = RRef.transpose();
-    const Eigen::Vector3d pTW = -RTW * pRef;
+    const RobotLibrary::Model::Pose referencePose = _trajectory.pose_at_progress(_pathProgress);
+    const RobotLibrary::Model::Pose currentPose = endpoint_pose();
+    const Eigen::Matrix3d referenceRotation = referencePose.quaternion().toRotationMatrix();
 
-    // Current endpoint pose in T0.
-    const RobotLibrary::Model::Pose poseCur = endpoint_pose();
-    const Eigen::Vector3d pCur = poseCur.translation();
-    const Eigen::Quaterniond qCur = poseCur.quaternion();
+    Eigen::Vector<double,ERROR_DIM> error0;
+    error0.head<3>() =
+        referenceRotation.transpose() * (currentPose.translation() - referencePose.translation());
+    const Eigen::Quaterniond relativeOrientation =
+        referencePose.quaternion().conjugate() * currentPose.quaternion();
+    error0.tail<3>() = quaternion_to_rotation_vector(relativeOrientation);
 
-    const Eigen::Vector3d pTCur = RTW * pCur + pTW;
-    const Eigen::Quaterniond qTW(RTW);
-    const Eigen::Quaterniond qTCur = qTW * qCur;
-    const Eigen::Vector3d rTCur = quaternion_orientation_error(qTCur, Eigen::Quaterniond::Identity());
+    const Eigen::Vector<double,NU> optimalControl = solve_mpcc(error0, referenceRotation);
+    _uLast = optimalControl;
 
-    // Desired twist in T0.
-    const Eigen::Vector3d vRefB = desiredVelocity.head<3>();
-    const Eigen::Vector3d wRefB = desiredVelocity.tail<3>();
-    const Eigen::Vector3d vRefT = RTW * vRefB;
-    const Eigen::Vector3d wRefT = RTW * wRefB;
-
-    // Progress speed and scaling (kept intentionally).
-    const double vProgressRef = std::clamp(_vProgressNominal, 0.0, _vProgressMax);
-    double alpha = 1.0;
-    if (_vProgressNominal > 1e-6)
-    {
-        alpha = vProgressRef / _vProgressNominal;
-    }
-    alpha = std::clamp(alpha, 0.0, 2.0);
-
-    Eigen::Vector<double,NU> uRefScaled = Eigen::Vector<double,NU>::Zero();
-    uRefScaled.segment<3>(0) = alpha * vRefT;
-    uRefScaled.segment<3>(3) = alpha * wRefT;
-    uRefScaled(6) = vProgressRef;
-
-    // Current MPCC state: [x y z rx ry rz s].
-    Eigen::Vector<double,NX> x0 = Eigen::Vector<double,NX>::Zero();
-    x0.segment<3>(0) = pTCur;
-    x0.segment<3>(3) = rTCur;
-    x0(6) = _sCurrent;
-
-    // Solve MPCC.
-    const Eigen::Vector<double,NU> uOpt = solve_mpcc(x0, uRefScaled);
-
-    // Integrate progress.
-    _uLast = uOpt;
-    _sCurrent = std::max(0.0, _sCurrent + uOpt(6) * _dt);
-
-    // Map optimal local twist back to base frame.
-    const Eigen::Vector3d vB = RTW.transpose() * uOpt.segment<3>(0);
-    const Eigen::Vector3d wB = RTW.transpose() * uOpt.segment<3>(3);
-
-    Eigen::Vector<double,6> twistB;
-    twistB.head<3>() = vB;
-    twistB.tail<3>() = wB;
-
-    return _innerKinematic->resolve_endpoint_twist(twistB);
+    Eigen::Vector<double,6> baseTwist;
+    baseTwist.head<3>() = referenceRotation * optimalControl.head<3>();
+    baseTwist.tail<3>() = referenceRotation * optimalControl.segment<3>(3);
+    return resolve_endpoint_twist(baseTwist);
 }
 
 Eigen::Vector<double,SerialLinkMPCC::NU>
-SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,NX> &x0,
-                           const Eigen::Vector<double,NU> &uRefScaled)
+SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
+                           const Eigen::Matrix3d &referenceRotation)
 {
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
 
     const int N = static_cast<int>(_horizon);
-    const int stateDim = NX * N;
+    const int errorDim = ERROR_DIM * N;
     const int controlDim = NU * N;
+    const double remaining = std::max(0.0, 1.0 - _pathProgress);
+    const bool relaxProgressMinimum =
+        remaining < static_cast<double>(N) * _dt * _vProgressMin;
+    const double progressMinimum = relaxProgressMinimum ? 0.0 : _vProgressMin;
 
-    // Linear model x_{k+1} = x_k + dt*u_k.
-    Eigen::Matrix<double,NX,NX> A = Eigen::Matrix<double,NX,NX>::Identity();
-    Eigen::Matrix<double,NX,NU> B = _dt * Eigen::Matrix<double,NX,NU>::Identity();
-
-    // Condensed prediction matrices: X = Ax*x0 + Bu*U.
-    MatrixXd Ax = MatrixXd::Zero(stateDim, NX);
-    MatrixXd Bu = MatrixXd::Zero(stateDim, controlDim);
-
-    for (int k = 0; k < N; ++k)
+    std::vector<Eigen::Vector<double,ERROR_DIM>> pathTangents(static_cast<size_t>(N));
+    double progress = _pathProgress;
+    for(int stage = 0; stage < N; ++stage)
     {
-        Ax.block(k * NX, 0, NX, NX) = A;
-        for (int j = 0; j <= k; ++j)
+        pathTangents[static_cast<size_t>(stage)] =
+            path_tangent_at_progress(progress, referenceRotation);
+
+        double rate = _vProgressNominal;
+        if(_warmStart.size() == controlDim)
         {
-            Bu.block(k * NX, j * NU, NX, NU) = B;
+            rate = _warmStart(stage * NU + 6);
+        }
+        progress = std::clamp(progress + _dt * std::clamp(rate, progressMinimum, _vProgressMax),
+                              0.0,
+                              1.0);
+    }
+
+    // Linearised error prediction:
+    // e_j = e_0 + dt * sum_{i<=j}(u_i - tau(s_i) * sdot_i).
+    MatrixXd errorResponse = MatrixXd::Zero(errorDim, controlDim);
+    VectorXd errorOffset = VectorXd::Zero(errorDim);
+    MatrixXd errorWeight = MatrixXd::Zero(errorDim, errorDim);
+    for(int stage = 0; stage < N; ++stage)
+    {
+        const int row = stage * ERROR_DIM;
+        errorOffset.segment<ERROR_DIM>(row) = error0;
+
+        const Eigen::Vector<double,ERROR_DIM> &tangent =
+            pathTangents[static_cast<size_t>(stage)];
+        Eigen::Vector3d tangentDirection = tangent.head<3>();
+        if(tangentDirection.norm() > 1e-9)
+        {
+            tangentDirection.normalize();
+        }
+        else
+        {
+            tangentDirection = Eigen::Vector3d::UnitX();
+        }
+
+        const Eigen::Matrix3d positionWeight =
+            _wContour * Eigen::Matrix3d::Identity()
+            + (_wLag - _wContour) * tangentDirection * tangentDirection.transpose();
+        errorWeight.block<3,3>(row, row) = positionWeight;
+        errorWeight.block<3,3>(row + 3, row + 3) =
+            _wOrientation * Eigen::Matrix3d::Identity();
+
+        for(int input = 0; input <= stage; ++input)
+        {
+            const int column = input * NU;
+            errorResponse.block<ERROR_DIM,ERROR_DIM>(row, column) +=
+                _dt * Eigen::Matrix<double,ERROR_DIM,ERROR_DIM>::Identity();
+            errorResponse.block<ERROR_DIM,1>(row, column + 6) +=
+                -_dt * pathTangents[static_cast<size_t>(input)];
         }
     }
 
-    // Build path-aligned position weight using reference velocity direction.
-    Eigen::Vector3d tHat = uRefScaled.head<3>();
-    if (tHat.norm() > 1e-6) tHat.normalize();
-    else                    tHat = Eigen::Vector3d::UnitX();
+    Eigen::Matrix<double,NU,NU> inputWeight =
+        Eigen::Matrix<double,NU,NU>::Zero();
+    inputWeight.diagonal() <<
+        _wInputLinear, _wInputLinear, _wInputLinear,
+        _wInputAngular, _wInputAngular, _wInputAngular,
+        _wInputProgress;
+    const MatrixXd inputWeightHorizon =
+        RobotLibrary::Math::block_diagonal(inputWeight, static_cast<unsigned int>(N));
 
-    const Eigen::Vector3d aux = (std::abs(tHat.z()) < 0.9)
-                              ? Eigen::Vector3d::UnitZ()
-                              : Eigen::Vector3d::UnitY();
-    const Eigen::Vector3d n1 = (aux.cross(tHat)).normalized();
-    const Eigen::Vector3d n2 = (tHat.cross(n1)).normalized();
-
-    Eigen::Matrix3d RPath;
-    RPath.col(0) = n1;
-    RPath.col(1) = n2;
-    RPath.col(2) = tHat;
-
-    const Eigen::Matrix3d QPosPath = Eigen::Vector3d(_wContour, _wContour, _wLag).asDiagonal();
-    const Eigen::Matrix3d QPos = RPath * QPosPath * RPath.transpose();
-
-    Eigen::Matrix<double,NX,NX> Qk = Eigen::Matrix<double,NX,NX>::Zero();
-    Qk.topLeftCorner<3,3>() = QPos;
-    Qk(3,3) = _wOrientation;
-    Qk(4,4) = _wOrientation;
-    Qk(5,5) = _wOrientation;
-    // Qk(6,6) left as zero to let progress be shaped by reward/constraints.
-
-    Eigen::Matrix<double,NU,NU> Rk = Eigen::Matrix<double,NU,NU>::Zero();
-    Rk(0,0) = _wInputLinear;
-    Rk(1,1) = _wInputLinear;
-    Rk(2,2) = _wInputLinear;
-    Rk(3,3) = _wInputAngular;
-    Rk(4,4) = _wInputAngular;
-    Rk(5,5) = _wInputAngular;
-    Rk(6,6) = _wInputProgress;
-
-    // Block diagonal Q and R.
-    MatrixXd Qb = MatrixXd::Zero(stateDim, stateDim);
-    MatrixXd Rb = MatrixXd::Zero(controlDim, controlDim);
-    for (int i = 0; i < N; ++i)
+    VectorXd nominalControl = VectorXd::Zero(controlDim);
+    MatrixXd pathVelocityResponse = MatrixXd::Zero(errorDim, controlDim);
+    const double nominalSeedRate =
+        std::min(_vProgressNominal,
+                 remaining / std::max(static_cast<double>(N) * _dt, 1e-9));
+    for(int stage = 0; stage < N; ++stage)
     {
-        Qb.block(i * NX, i * NX, NX, NX) = Qk;
-        Rb.block(i * NU, i * NU, NU, NU) = Rk;
+        const int offset = stage * NU;
+        const int row = stage * ERROR_DIM;
+        nominalControl.segment<ERROR_DIM>(offset) =
+            pathTangents[static_cast<size_t>(stage)] * nominalSeedRate;
+        nominalControl(offset + 6) = nominalSeedRate;
+        pathVelocityResponse.block<ERROR_DIM,ERROR_DIM>(row, offset).setIdentity();
+        pathVelocityResponse.block<ERROR_DIM,1>(row, offset + 6) =
+            -pathTangents[static_cast<size_t>(stage)];
     }
 
-    // Reference stack:
-    // position/orientation target in local frame is zero,
-    // progress target advances with v_progress_ref.
-    VectorXd xRefStack = VectorXd::Zero(stateDim);
-    for (int k = 0; k < N; ++k)
+    MatrixXd difference = MatrixXd::Zero(controlDim, controlDim);
+    for(int stage = 0; stage < N; ++stage)
     {
-        xRefStack(k * NX + 6) = _sCurrent + static_cast<double>(k + 1) * uRefScaled(6) * _dt;
-    }
-
-    VectorXd uRefStack = VectorXd::Zero(controlDim);
-    for (int k = 0; k < N; ++k)
-    {
-        uRefStack.segment(k * NU, NU) = uRefScaled;
-    }
-
-    // Delta-u regularisation.
-    MatrixXd Ed = MatrixXd::Zero(controlDim, controlDim);
-    for (int i = 0; i < N; ++i)
-    {
-        Ed.block(i * NU, i * NU, NU, NU).setIdentity();
-        if (i > 0)
+        difference.block<NU,NU>(stage * NU, stage * NU).setIdentity();
+        if(stage > 0)
         {
-            Ed.block(i * NU, (i - 1) * NU, NU, NU) = -Eigen::Matrix<double,NU,NU>::Identity();
+            difference.block<NU,NU>(stage * NU, (stage - 1) * NU) =
+                -Eigen::Matrix<double,NU,NU>::Identity();
         }
     }
-    MatrixXd Rdu = _wDeltaU * MatrixXd::Identity(controlDim, controlDim);
+    const MatrixXd deltaWeight =
+        _wDeltaU * MatrixXd::Identity(controlDim, controlDim);
+    VectorXd deltaReference = VectorXd::Zero(controlDim);
+    deltaReference.head<NU>() = _uLast;
 
-    // Velocity tracking term only on first 6 dimensions.
-    MatrixXd Rv = MatrixXd::Zero(controlDim, controlDim);
-    for (int i = 0; i < N; ++i)
-    {
-        Rv.block(i * NU, i * NU, 6, 6) = _wVelocityTracking * MatrixXd::Identity(6, 6);
-    }
-
-    VectorXd X0 = Ax * x0;
-    VectorXd e = X0 - xRefStack;
-
-    // Cost: 0.5 U' H U + f' U.
-    MatrixXd H = Bu.transpose() * Qb * Bu + Rb + Ed.transpose() * Rdu * Ed + Rv;
+    MatrixXd H =
+        errorResponse.transpose() * errorWeight * errorResponse
+        + inputWeightHorizon
+        + difference.transpose() * deltaWeight * difference
+        + _wVelocityTracking * pathVelocityResponse.transpose() * pathVelocityResponse;
     H += 1e-8 * MatrixXd::Identity(controlDim, controlDim);
+    H = 0.5 * (H + H.transpose());
 
-    VectorXd f = Bu.transpose() * Qb * e - Rv * uRefStack;
-
-    // Delta-u offset around last applied control.
-    VectorXd uOffset = VectorXd::Zero(controlDim);
-    for (int i = 0; i < N; ++i)
+    VectorXd f =
+        errorResponse.transpose() * errorWeight * errorOffset
+        - difference.transpose() * deltaWeight * deltaReference;
+    for(int stage = 0; stage < N; ++stage)
     {
-        uOffset.segment(i * NU, NU) = _uLast;
+        f(stage * NU + 6) -= _qProgressReward * _dt;
     }
-    f -= Ed.transpose() * Rdu * Ed * uOffset;
 
-    // Progress reward: encourage larger v_progress.
-    if (_qProgressReward > 0.0)
+    VectorXd lower = VectorXd::Zero(controlDim);
+    VectorXd upper = VectorXd::Zero(controlDim);
+    for(int stage = 0; stage < N; ++stage)
     {
-        for (int i = 0; i < N; ++i)
+        const int offset = stage * NU;
+        lower.segment<3>(offset).setConstant(-_vMaxLinear);
+        upper.segment<3>(offset).setConstant(_vMaxLinear);
+        lower.segment<3>(offset + 3).setConstant(-_vMaxAngular);
+        upper.segment<3>(offset + 3).setConstant(_vMaxAngular);
+        lower(offset + 6) = progressMinimum;
+        upper(offset + 6) = _vProgressMax;
+    }
+
+    const RobotLibrary::Math::BoxConstraint box =
+        RobotLibrary::Math::box_constraint(lower, upper);
+    MatrixXd constraintMatrix =
+        MatrixXd::Zero(box.constraintMatrix.rows() + 1, controlDim);
+    VectorXd constraintVector =
+        VectorXd::Zero(box.constraintVector.size() + 1);
+    constraintMatrix.topRows(box.constraintMatrix.rows()) = box.constraintMatrix;
+    constraintVector.head(box.constraintVector.size()) = box.constraintVector;
+    for(int stage = 0; stage < N; ++stage)
+    {
+        constraintMatrix(box.constraintMatrix.rows(), stage * NU + 6) = _dt;
+    }
+    constraintVector.tail<1>()(0) = remaining;
+
+    auto make_feasible = [&](VectorXd seed)
+    {
+        if(seed.size() != controlDim)
         {
-            f(i * NU + 6) -= _qProgressReward * _dt;
+            seed = nominalControl;
         }
-    }
+        for(int i = 0; i < controlDim; ++i)
+        {
+            seed(i) = std::clamp(seed(i), lower(i), upper(i));
+        }
 
-    // Box constraints on U.
-    VectorXd uMin = VectorXd::Zero(controlDim);
-    VectorXd uMax = VectorXd::Zero(controlDim);
-    for (int i = 0; i < N; ++i)
-    {
-        const int o = i * NU;
-        uMin.segment<3>(o) << -_vMaxLinear, -_vMaxLinear, -_vMaxLinear;
-        uMax.segment<3>(o) <<  _vMaxLinear,  _vMaxLinear,  _vMaxLinear;
-        uMin.segment<3>(o + 3) << -_vMaxAngular, -_vMaxAngular, -_vMaxAngular;
-        uMax.segment<3>(o + 3) <<  _vMaxAngular,  _vMaxAngular,  _vMaxAngular;
-        uMin(o + 6) = _vProgressMin;
-        uMax(o + 6) = _vProgressMax;
-    }
+        double predictedAdvance = 0.0;
+        for(int stage = 0; stage < N; ++stage)
+        {
+            predictedAdvance += _dt * seed(stage * NU + 6);
+        }
+        if(predictedAdvance > remaining)
+        {
+            const double feasibleRate =
+                (N > 0 and _dt > 0.0) ? remaining / (static_cast<double>(N) * _dt) : 0.0;
+            for(int stage = 0; stage < N; ++stage)
+            {
+                seed(stage * NU + 6) = feasibleRate;
+            }
+        }
+        return seed;
+    };
 
-    MatrixXd Bineq = MatrixXd::Zero(2 * controlDim, controlDim);
-    Bineq.topRows(controlDim).setIdentity();
-    Bineq.bottomRows(controlDim) = -MatrixXd::Identity(controlDim, controlDim);
-
-    VectorXd zIneq(2 * controlDim);
-    zIneq.head(controlDim) = uMax;
-    zIneq.tail(controlDim) = -uMin;
-
-    // Warm-start.
-    if (_warmStart.size() != controlDim)
-    {
-        _warmStart = uRefStack;
-    }
-
-    VectorXd Uopt;
+    VectorXd seed = make_feasible(_warmStart);
+    VectorXd optimum;
     try
     {
-        Uopt = _qpSolver.solve(H, f, Bineq, zIneq, _warmStart);
+        optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
+        if(optimum.size() != controlDim or not optimum.allFinite())
+        {
+            throw std::runtime_error("QP returned an invalid solution.");
+        }
     }
-    catch (const std::exception &)
+    catch(const std::exception &)
     {
-        Uopt = uRefStack;
+        optimum = seed;
+        if(remaining <= 1e-9)
+        {
+            for(int stage = 0; stage < N; ++stage)
+            {
+                optimum.segment<ERROR_DIM>(stage * NU).setZero();
+            }
+        }
     }
+    optimum = make_feasible(optimum);
 
-    if (Uopt.size() != controlDim)
+    _warmStart = optimum;
+    for(int stage = 0; stage < N - 1; ++stage)
     {
-        Uopt = uRefStack;
+        _warmStart.segment<NU>(stage * NU) = optimum.segment<NU>((stage + 1) * NU);
     }
 
-    _warmStart = Uopt;
-
-    Eigen::Vector<double,NU> u0 = Uopt.head<NU>();
-
-    // Safety clamp on first control.
-    for (int i = 0; i < 3; ++i)
+    Eigen::Vector<double,NU> firstControl = optimum.head<NU>();
+    for(int i = 0; i < 3; ++i)
     {
-        u0(i) = std::clamp(u0(i), -_vMaxLinear, _vMaxLinear);
-        u0(i + 3) = std::clamp(u0(i + 3), -_vMaxAngular, _vMaxAngular);
+        firstControl(i) = std::clamp(firstControl(i), -_vMaxLinear, _vMaxLinear);
+        firstControl(i + 3) =
+            std::clamp(firstControl(i + 3), -_vMaxAngular, _vMaxAngular);
     }
-    u0(6) = std::clamp(u0(6), _vProgressMin, _vProgressMax);
-
-    return u0;
+    firstControl(6) = std::clamp(firstControl(6), progressMinimum, _vProgressMax);
+    return firstControl;
 }
 
-RobotLibrary::Model::Limits
-SerialLinkMPCC::compute_control_limits(const unsigned int &jointNumber)
+Eigen::Vector<double,6>
+SerialLinkMPCC::path_tangent_at_progress(
+    const double progress,
+    const Eigen::Matrix3d &referenceRotation)
 {
-    // Keep limits consistent with SerialLinkKinematic behaviour.
-    RobotLibrary::Model::Limits limits;
+    const RobotLibrary::Model::Pose pathPose = _trajectory.pose_at_progress(progress);
+    const Eigen::Matrix3d relativeRotation =
+        referenceRotation.transpose() * pathPose.quaternion().toRotationMatrix();
+    const Eigen::Vector<double,6> bodyTangent =
+        _trajectory.tangent_at_progress(progress);
 
-    double delta = _model->joint_positions()[jointNumber]
-                 - _model->link(jointNumber)->joint().position_limits().lower;
-
-    limits.lower = std::max(-delta * _controlFrequency,
-                    std::max(-_model->link(jointNumber)->joint().speed_limit(),
-                             -2 * std::sqrt(_maxJointAcceleration * delta)));
-
-    delta = _model->link(jointNumber)->joint().position_limits().upper
-          - _model->joint_positions()[jointNumber];
-
-    limits.upper = std::min(delta * _controlFrequency,
-                    std::min(_model->link(jointNumber)->joint().speed_limit(),
-                             2 * std::sqrt(_maxJointAcceleration * delta)));
-
-    if (limits.lower > limits.upper)
-    {
-        throw std::runtime_error(
-            "[ERROR] [SERIAL LINK MPCC] compute_control_limits(): "
-            "Lower limit for joint " + std::to_string(jointNumber) + " is greater than upper limit.");
-    }
-
-    return limits;
+    Eigen::Vector<double,6> localTangent;
+    localTangent.head<3>() = relativeRotation * bodyTangent.head<3>();
+    localTangent.tail<3>() = relativeRotation * bodyTangent.tail<3>();
+    return localTangent;
 }
 
 } } // namespace

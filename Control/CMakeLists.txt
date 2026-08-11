@@ -1,10 +1,16 @@
 
 # List the source files for this library
-add_library(Control src/SerialLinkBase.cpp
+add_library(Control src/AdmittanceContactController.cpp
+                    src/ContactControllerBase.cpp
+                    src/SerialLinkBase.cpp
+                    src/SerialLinkGeometricImpedance.cpp
                     src/SerialLinkImpedance.cpp
                     src/SerialLinkKinematic.cpp
+                    src/SerialLinkVelocityBase.cpp
                     src/SerialLinkMPCC.cpp
+                    src/SerialLinkCartesianMPCC.cpp
                     src/SerialLinkMPC.cpp
+                    src/SerialLinkMovingFrameMPC.cpp
                     src/SerialLinkRMPCC.cpp
 )
 

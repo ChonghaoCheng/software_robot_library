@@ -10,10 +10,10 @@
  *          [position; rotation_vector] in the base frame, and the control input is
  *          the endpoint twist [linear_velocity; angular_velocity] in the same frame.
  *
- *          The MPC runs at a lower rate (e.g. 100 Hz) and outputs a desired
- *          endpoint twist. An internal SerialLinkKinematic controller is then used
- *          to map this twist to joint velocities, so all joint-space limits,
- *          singularity avoidance, and redundancy handling reuse existing logic.
+ *          The MPC runs at the configured sampling time and outputs a desired
+ *          endpoint twist. The shared SerialLinkVelocityBase layer maps this
+ *          twist to joint velocities using the same cached model state and
+ *          Jacobian as the MPC controller.
  *
  *          The optimisation itself uses the QPSolver class from Math/, with a
  *          condensed prediction model x_{k+1} = x_k + dt * u_k over a finite
@@ -23,11 +23,12 @@
 #ifndef SERIAL_LINK_MPC_H
 #define SERIAL_LINK_MPC_H
 
-#include <Control/SerialLinkBase.h>
-#include <Control/SerialLinkKinematic.h>
+#include <Control/SerialLinkVelocityBase.h>
+#include <Trajectory/CartesianSpline.h>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <vector>
 
 namespace RobotLibrary { namespace Control {
 
@@ -36,9 +37,9 @@ namespace RobotLibrary { namespace Control {
  *
  * The primary entry point is track_endpoint_trajectory(), which computes a
  * desired endpoint twist over a finite prediction horizon and then maps it to
- * joint velocities using an internal SerialLinkKinematic object.
+ * joint velocities using the shared resolved-rate velocity layer.
  */
-class SerialLinkMPC : public SerialLinkBase
+class SerialLinkMPC : public SerialLinkVelocityBase
 {
     public:
 
@@ -48,40 +49,20 @@ class SerialLinkMPC : public SerialLinkBase
          * @param endpointName Name of the endpoint frame on the KinematicTree.
          * @param parameters   Control and QP solver parameters.
          * @param horizon      Prediction horizon length (number of steps).
-         * @param dt           MPC sampling time [s] (e.g. 0.01 for 100 Hz).
+         * @param dt           MPC sampling time [s] (e.g. 0.002 for 500 Hz).
          */
         SerialLinkMPC(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
                       const std::string &endpointName,
                       const RobotLibrary::Control::SerialLinkParameters &parameters = SerialLinkParameters(),
                       unsigned int horizon = 20,
-                      double dt = 0.01);
-
-        /**
-         * @brief Solve the joint motion required to achieve a desired endpoint motion.
-         *
-         * For MPC, this method simply delegates to the internal kinematic controller.
-         */
-        Eigen::VectorXd
-        resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion) override;
-
-        /**
-         * @brief Compute joint motion required to execute a specified endpoint twist.
-         *
-         * For MPC, this also delegates to the internal kinematic controller to
-         * preserve the resolved-rate behaviour when MPC is not required.
-         */
-        Eigen::VectorXd
-        resolve_endpoint_twist(const Eigen::Vector<double,6> &twist) override;
+                      double dt = 0.002);
 
         /**
          * @brief Compute joint velocities required to track a Cartesian trajectory.
          *
-         * This is the main MPC entry point. The function:
-         *  - builds the current 6D state [position; rotation_vector],
-         *  - builds a 6D reference [position; rotation_vector],
-         *  - runs a finite-horizon MPC to compute the optimal endpoint twist, and
-         *  - maps that twist to joint velocities using the internal kinematic
-         *    controller.
+         * This compatibility entry point only receives one sampled reference, so
+         * it constructs a local horizon by linearly extrapolating that reference
+         * with the supplied desired velocity.
          */
         Eigen::VectorXd
         track_endpoint_trajectory(const RobotLibrary::Model::Pose &desiredPose,
@@ -89,34 +70,43 @@ class SerialLinkMPC : public SerialLinkBase
                                   const Eigen::Vector<double,6>   &desiredAcceleration) override;
 
         /**
-         * @brief Compute joint motion required to track a joint space trajectory.
+         * @brief Set the full time-indexed Cartesian reference trajectory.
          *
-         * In the initial implementation this delegates directly to the internal
-         * kinematic controller.
+         * Use this with track_endpoint_trajectory_at_time() when the caller wants
+         * the MPC horizon to sample the real future reference poses/twists.
          */
-        Eigen::VectorXd
-        track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
-                               const Eigen::VectorXd &desiredVelocity,
-                               const Eigen::VectorXd &desiredAcceleration) override;
-
-    protected:
+        void
+        set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory);
 
         /**
-         * @brief Compute instantaneous limits on joint control.
-         *
-         * The MPC layer itself constrains Cartesian velocities; joint-space limits
-         * are handled identically to SerialLinkKinematic.
+         * @brief Clear the currently stored trajectory and warm start.
          */
-        RobotLibrary::Model::Limits
-        compute_control_limits(const unsigned int &jointNumber) override;
+        void
+        clear_trajectory();
 
-    private:
+        /**
+         * @brief True when a trajectory has been supplied through set_trajectory().
+         */
+        bool
+        has_trajectory() const { return _trajectorySet; }
+
+        /**
+         * @brief Track the stored time-indexed Cartesian trajectory at the given time.
+         *
+         * The MPC reference stack is sampled at time + k * dt over the prediction
+         * horizon, so the optimisation sees the future path instead of a repeated
+         * current reference point.
+         */
+        Eigen::VectorXd
+        track_endpoint_trajectory_at_time(const double &time);
+
+    protected:
 
         /// Length of the MPC prediction horizon (number of time steps).
         unsigned int _horizon = 20;
 
         /// MPC sampling time [s] (should match 1 / _controlFrequency).
-        double _dt = 0.01;
+        double _dt = 0.002;
 
         // State and control weights:
         double _wPosition        = 60.0;   ///< Weight on position error (per axis).
@@ -128,8 +118,11 @@ class SerialLinkMPC : public SerialLinkBase
         double _maxLinearSpeed   = 0.5;     ///< Max linear speed [m/s] for each axis.
         double _maxAngularSpeed  = 0.5;     ///< Max angular speed [rad/s] for each axis.
 
-        /// Internal kinematic controller used to map twist to joint velocities.
-        std::shared_ptr<SerialLinkKinematic> _innerKinematic;
+        /// Optional full reference trajectory used by the time-indexed MPC API.
+        RobotLibrary::Trajectory::CartesianSpline _trajectory;
+
+        /// True after set_trajectory() has been called.
+        bool _trajectorySet = false;
 
         /// Underlying QP solver instance for the MPC problem.
         QPSolver<double> _qpSolver;
@@ -138,28 +131,33 @@ class SerialLinkMPC : public SerialLinkBase
         Eigen::VectorXd _warmStart;
 
         /**
-         * @brief Quaternion-based orientation error from current to reference.
+         * @brief Solve the MPC problem for a single reference point.
          *
-         * @param qCurrent Current endpoint orientation.
-         * @param qRef     Desired endpoint orientation.
-         * @return 3x1 orientation error vector (angle-axis form) used by MPC.
-         */
-        static Eigen::Vector3d
-        quaternion_orientation_error(const Eigen::Quaterniond &qCurrent,
-                                     const Eigen::Quaterniond &qRef);
-
-        /**
-         * @brief Solve the MPC problem for a given initial state and reference.
+         * This compatibility overload fills the horizon with the same state and
+         * control references.
          *
-         * @param x0   6x1 current state [position; orientation_error].
-         * @param xRef 6x1 reference state over the horizon.
-         * @param uRef 6x1 reference control (twist) over the horizon.
+         * @param x0   6x1 current state [position; rotation_vector].
+         * @param xRef 6x1 reference state.
+         * @param uRef 6x1 reference control (twist).
          * @return 6x1 optimal control input for the first step in the horizon.
          */
         Eigen::Matrix<double,6,1>
         solveMPC(const Eigen::Matrix<double,6,1> &x0,
                  const Eigen::Matrix<double,6,1> &xRef,
                  const Eigen::Matrix<double,6,1> &uRef);
+
+        /**
+         * @brief Solve the MPC problem for a full horizon reference stack.
+         *
+         * @param x0        6x1 current state [position; rotation_vector].
+         * @param xRefStack Reference states for x1..xN.
+         * @param uRefStack Reference controls for u0..uN-1.
+         * @return 6x1 optimal control input for the first step in the horizon.
+         */
+        Eigen::Matrix<double,6,1>
+        solveMPC(const Eigen::Matrix<double,6,1> &x0,
+                 const std::vector<Eigen::Matrix<double,6,1>> &xRefStack,
+                 const std::vector<Eigen::Matrix<double,6,1>> &uRefStack);
 };
 
 } } // namespace

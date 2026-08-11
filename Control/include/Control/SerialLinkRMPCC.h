@@ -3,19 +3,19 @@
  * @brief   Riemannian MPCC controller for serial link robot arms.
  *
  * @details This class implements a Riemannian Model Predictive Contouring Control
- *          (RMPCC) formulation directly on SE(3). Unlike SerialLinkMPCC (which is
- *          fed a single desired pose every tick and assumes a locally straight path),
- *          SerialLinkRMPCC OWNS the reference trajectory and its own path progress,
- *          so the prediction horizon can look ahead along the real path curvature.
+ *          (RMPCC) formulation directly on SE(3). The controller stores the
+ *          complete reference path, while the caller supplies the externally
+ *          estimated closest progress at every control step. The prediction
+ *          horizon then optimises future progress along the real path curvature.
  *
  *          State / error:   e = log_SE3( T_ref(s)^{-1} T ) in R^6  (body twist)
  *          Control:         u in R^6 body twist + scalar progress rate sdot
  *          Decision vector: z = [u_1..u_N, sdot_1..sdot_N] in R^{7N}
  *          Prediction:      e_j ~= e_0 + dt * sum_{i<=j} ( u_i - tau(s_i) * sdot_i )
  *
- *          The first 6 dims of the optimal control are converted to a base-frame
- *          spatial velocity via the SE(3) adjoint and turned into joint velocities
- *          with an internal SerialLinkKinematic.
+ *          The first 6 dims of the optimal control are rotated into the base
+ *          frame as endpoint point velocity [p_dot; omega], then turned into
+ *          joint velocities by the shared velocity-control layer.
  *
  *          A constant (rigid) workspace disturbance D is supported via
  *          set_disturbance(): T_active(s) = D * T_ref(s). For a rigid D the body
@@ -25,8 +25,7 @@
 #ifndef SERIAL_LINK_RMPCC_H
 #define SERIAL_LINK_RMPCC_H
 
-#include <Control/SerialLinkBase.h>
-#include <Control/SerialLinkKinematic.h>
+#include <Control/SerialLinkVelocityBase.h>
 #include <Trajectory/CartesianSpline.h>
 
 #include <Eigen/Core>
@@ -73,7 +72,7 @@ struct RmpccParameters
 
     // Riemannian tracking
     double lagWeight                 = 80.0;     ///< Weight on the along-path (lag) error component
-    bool   poseFeedbackEnable        = true;     ///< Add an outer pose-feedback term to the body twist
+    bool   poseFeedbackEnable        = true;     ///< Add an outer pose-feedback term after conversion to base-frame twist
 
     Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> poseFeedbackGain =
         (Eigen::Vector<double, TWIST_DIM>() << 20.0, 20.0, 20.0, 5.0, 5.0, 5.0).finished().asDiagonal();
@@ -99,7 +98,7 @@ struct RmpccDiagnostics
 {
     Eigen::Vector<double, 6> bodyTwist   = Eigen::Vector<double, 6>::Zero(); ///< Optimal first body twist u_1
     double progressRate          = 0.0;  ///< Optimal first progress rate sdot_1
-    double pathProgress          = 0.0;  ///< Current owned progress s
+    double pathProgress          = 0.0;  ///< Current externally estimated progress s
     double se3ErrorNorm          = 0.0;  ///< ||e_0|| (mixed units, diagnostic only)
     double contourError          = 0.0;  ///< Norm of the contour (perpendicular) error component
     double lagError              = 0.0;  ///< Signed lag (along-path) error component
@@ -111,9 +110,9 @@ struct RmpccDiagnostics
 };
 
 /**
- * @brief Riemannian MPCC controller that owns its reference path and progress.
+ * @brief Riemannian MPCC controller using a stored path and externally estimated progress.
  */
-class SerialLinkRMPCC : public SerialLinkBase
+class SerialLinkRMPCC : public SerialLinkVelocityBase
 {
     public:
         /**
@@ -128,29 +127,15 @@ class SerialLinkRMPCC : public SerialLinkBase
                         const RobotLibrary::Control::SerialLinkParameters &parameters = SerialLinkParameters(),
                         const RmpccParameters &rmpcc = RmpccParameters());
 
-        // ----- SerialLinkBase interface: delegated to the inner kinematic controller -----
-
-        Eigen::VectorXd
-        resolve_endpoint_motion(const Eigen::Vector<double,6> &endpointMotion) override;
-
-        Eigen::VectorXd
-        resolve_endpoint_twist(const Eigen::Vector<double,6> &twist) override;
-
         /**
-         * @brief Single-pose tracking fallback (delegates to the inner kinematic controller).
-         *        RMPCC trajectory tracking should use set_trajectory() + step() instead.
+         * @brief Unsupported single-pose interface required by SerialLinkBase.
+         * @throws std::logic_error Always. RMPCC requires a complete trajectory
+         *         and an externally estimated progress.
          */
         Eigen::VectorXd
         track_endpoint_trajectory(const RobotLibrary::Model::Pose &desiredPose,
                                   const Eigen::Vector<double,6>   &desiredVelocity,
                                   const Eigen::Vector<double,6>   &desiredAcceleration) override;
-
-        Eigen::VectorXd
-        track_joint_trajectory(const Eigen::VectorXd &desiredPosition,
-                               const Eigen::VectorXd &desiredVelocity,
-                               const Eigen::VectorXd &desiredAcceleration) override;
-
-        // ----- RMPCC-specific API (Option A: controller owns the path) -----
 
         /**
          * @brief Set the reference path and reset progress/warm-start state.
@@ -174,13 +159,13 @@ class SerialLinkRMPCC : public SerialLinkBase
         set_schedule_limit(double scheduleProgressLimit);
 
         /**
-         * @brief Reset owned progress, warm start and rate memory (call on a new goal).
+         * @brief Reset progress, warm start and rate memory (call on a new goal).
          */
         void
         reset();
 
         /**
-         * @brief Current owned path progress s in [0, 1].
+         * @brief Most recent externally supplied path progress s in [0, 1].
          */
         double
         path_progress() const { return _pathProgress; }
@@ -193,11 +178,12 @@ class SerialLinkRMPCC : public SerialLinkBase
         reference_pose(double progress);
 
         /**
-         * @brief Run one RMPCC control step and return the joint velocity command.
+         * @brief Run one RMPCC control step from an externally estimated closest progress.
          * @param dt Time since the previous step [s].
+         * @param estimatedProgress Current closest path progress in [0,1].
          */
         Eigen::VectorXd
-        step(double dt);
+        step(double dt, double estimatedProgress);
 
         /**
          * @brief Diagnostics from the most recent step().
@@ -205,16 +191,11 @@ class SerialLinkRMPCC : public SerialLinkBase
         const RmpccDiagnostics&
         diagnostics() const { return _diagnostics; }
 
-    protected:
-        RobotLibrary::Model::Limits
-        compute_control_limits(const unsigned int &jointNumber) override;
-
     private:
         static constexpr int TWIST_DIM = 6;
 
         RmpccParameters _rmpcc;
 
-        std::shared_ptr<SerialLinkKinematic> _innerKinematic;
         QPSolver<double> _qpSolver;
 
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
@@ -223,7 +204,7 @@ class SerialLinkRMPCC : public SerialLinkBase
         Eigen::Matrix4d _disturbance = Eigen::Matrix4d::Identity();
         double _scheduleProgressLimit = 1.0;
 
-        // Owned MPCC state
+        // The external estimate is authoritative; predicted progress exists only in the QP.
         double _pathProgress = 0.0;
         double _lastProgressRate = 0.0;
         Eigen::Vector<double, TWIST_DIM> _lastBodyTwist = Eigen::Vector<double, TWIST_DIM>::Zero();
