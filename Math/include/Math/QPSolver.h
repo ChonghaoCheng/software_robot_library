@@ -298,7 +298,6 @@ QPSolver<DataType>::QPSolver(const SolverOptions<DataType> &options)
                                     "but received " + options.method);
     }
     
-    std::cout << "[INFO] [QP SOLVER] Using the " + options.method + " method." << std::endl;
 }
           
   ////////////////////////////////////////////////////////////////////////////////////////////////////

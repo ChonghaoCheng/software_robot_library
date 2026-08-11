@@ -23,6 +23,7 @@
 #include <Math/DataStructures.h>
 
 #include <Eigen/Dense>                                                                               // Eigen::Vector, Eigen::Matrix etc
+#include <Eigen/Geometry>                                                                            // Eigen::Quaterniond
 #include <iostream>
 #include <vector>
 
@@ -115,6 +116,89 @@ se3_logarithm(const Eigen::Matrix4d &T);
  */
 Eigen::Matrix4d
 se3_inverse(const Eigen::Matrix4d &T);
+
+/**
+ * @brief Exponential map of SO(3): a rotation vector (angle * axis) to a rotation matrix.
+ *        Inverse of so3_logarithm(). Uses Rodrigues' formula with small-angle Taylor expansion.
+ * @param vector The rotation vector in R^3.
+ * @return A 3x3 rotation matrix.
+ */
+Eigen::Matrix3d
+so3_exponential(const Eigen::Vector3d &vector);
+
+/**
+ * @brief Exponential map of SE(3): a body twist to a homogeneous transform.
+ *        Inverse of se3_logarithm(). The twist uses the [v; w] (linear first) ordering.
+ * @param twist The body twist [v; w] in R^6.
+ * @return A 4x4 homogeneous transform.
+ */
+Eigen::Matrix4d
+se3_exponential(const Eigen::Matrix<double,6,1> &twist);
+
+/**
+ * @brief Left Jacobian of SO(3). Maps a rotation-vector rate to the SPATIAL angular velocity:
+ *        w_spatial = J_l(r) * r_dot. Equivalently the SE(3) "V" matrix used by se3_exponential().
+ * @param vector The rotation vector r in R^3.
+ * @return A 3x3 matrix.
+ */
+Eigen::Matrix3d
+so3_left_jacobian(const Eigen::Vector3d &vector);
+
+/**
+ * @brief Right Jacobian of SO(3). Maps a rotation-vector rate to the BODY angular velocity:
+ *        w_body = J_r(r) * r_dot. Note J_r(r) = J_l(-r).
+ * @param vector The rotation vector r in R^3.
+ * @return A 3x3 matrix.
+ */
+Eigen::Matrix3d
+so3_right_jacobian(const Eigen::Vector3d &vector);
+
+/**
+ * @brief Inverse of the left Jacobian of SO(3): r_dot = J_l^{-1}(r) * w_spatial.
+ *        This is exactly the "Vinv" matrix used inside se3_logarithm().
+ * @param vector The rotation vector r in R^3.
+ * @return A 3x3 matrix.
+ */
+Eigen::Matrix3d
+so3_left_jacobian_inverse(const Eigen::Vector3d &vector);
+
+/**
+ * @brief Inverse of the right Jacobian of SO(3): r_dot = J_r^{-1}(r) * w_body.
+ * @param vector The rotation vector r in R^3.
+ * @return A 3x3 matrix.
+ */
+Eigen::Matrix3d
+so3_right_jacobian_inverse(const Eigen::Vector3d &vector);
+
+/**
+ * @brief Adjoint of an SE(3) transform for the [v; w] (linear first) twist ordering.
+ *        Maps a body twist to a spatial twist: xi_spatial = Adjoint(T) * xi_body, i.e.
+ *        v_spatial = R*v_body + p x (R*w_body),  w_spatial = R*w_body.
+ * @param T A 4x4 homogeneous transform.
+ * @return A 6x6 adjoint matrix.
+ */
+Eigen::Matrix<double,6,6>
+adjoint(const Eigen::Matrix4d &T);
+
+/**
+ * @brief Convert a quaternion to the shortest equivalent rotation vector (angle * axis).
+ *        Robust to non-normalised / non-finite inputs, and enforces the w >= 0 hemisphere.
+ * @param quaternion The orientation to convert.
+ * @return The rotation vector in R^3.
+ */
+Eigen::Vector3d
+quaternion_to_rotation_vector(const Eigen::Quaterniond &quaternion);
+
+/**
+ * @brief Orientation error from a current to a desired orientation, as a rotation vector
+ *        expressed in the reference (world) frame: e = log( q_desired * q_current^{-1} ).
+ * @param current The current orientation.
+ * @param desired The desired orientation.
+ * @return The orientation error rotation vector in R^3.
+ */
+Eigen::Vector3d
+quaternion_orientation_error(const Eigen::Quaterniond &current,
+                             const Eigen::Quaterniond &desired);
 
 } }
 

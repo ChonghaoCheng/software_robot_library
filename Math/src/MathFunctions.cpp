@@ -309,19 +309,9 @@ se3_logarithm(const Eigen::Matrix4d &T)
     const Eigen::Matrix3d R = T.block<3,3>(0,0);
     const Eigen::Vector3d p = T.block<3,1>(0,3);
     const Eigen::Vector3d w = so3_logarithm(R);
-    const double theta = w.norm();
 
-    Eigen::Matrix3d Vinv = Eigen::Matrix3d::Identity();
-    if(theta > 1e-10)
-    {
-        const Eigen::Matrix3d W = SkewSymmetric(w).as_matrix();
-        const double theta2 = theta * theta;
-        const double coeff = 1.0 / theta2 - (1.0 + std::cos(theta)) / (2.0 * theta * std::sin(theta));
-        Vinv -= 0.5 * W;
-        Vinv += coeff * W * W;
-    }
-
-    twist.head<3>() = Vinv * p;
+    // The translation maps through the inverse left Jacobian: v = J_l^{-1}(w) * p.
+    twist.head<3>() = so3_left_jacobian_inverse(w) * p;
     twist.tail<3>() = w;
     return twist;
 }
@@ -338,6 +328,157 @@ se3_inverse(const Eigen::Matrix4d &T)
     inverse.block<3,3>(0,0) = R.transpose();
     inverse.block<3,1>(0,3) = -R.transpose() * p;
     return inverse;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                            Exponential map of SO(3): rotation vector -> R                       //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix3d
+so3_exponential(const Eigen::Vector3d &vector)
+{
+    const double theta  = vector.norm();
+    const Eigen::Matrix3d W = SkewSymmetric(vector).as_matrix();
+
+    // Rodrigues: R = I + a*W + b*W^2, with a = sin(t)/t, b = (1 - cos(t))/t^2.
+    // Use Taylor series near 0 to avoid the 0/0 singularity (and keep R orthonormal to O(t^4)).
+    double a, b;
+    if(theta < 1e-6)
+    {
+        const double t2 = theta * theta;
+        a = 1.0 - t2 / 6.0;                                                                          // sin(t)/t
+        b = 0.5 - t2 / 24.0;                                                                         // (1 - cos t)/t^2
+    }
+    else
+    {
+        a = std::sin(theta) / theta;
+        b = (1.0 - std::cos(theta)) / (theta * theta);
+    }
+
+    return Eigen::Matrix3d::Identity() + a * W + b * W * W;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                              Left Jacobian of SO(3)  (and inverse)                              //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix3d
+so3_left_jacobian(const Eigen::Vector3d &vector)
+{
+    const double theta = vector.norm();
+    const Eigen::Matrix3d W = SkewSymmetric(vector).as_matrix();
+
+    // J_l = I + c1*W + c2*W^2,  c1 = (1 - cos t)/t^2,  c2 = (t - sin t)/t^3
+    double c1, c2;
+    if(theta < 1e-6)
+    {
+        const double t2 = theta * theta;
+        c1 = 0.5 - t2 / 24.0;
+        c2 = 1.0 / 6.0 - t2 / 120.0;
+    }
+    else
+    {
+        const double t2 = theta * theta;
+        c1 = (1.0 - std::cos(theta)) / t2;
+        c2 = (theta - std::sin(theta)) / (t2 * theta);
+    }
+
+    return Eigen::Matrix3d::Identity() + c1 * W + c2 * W * W;
+}
+
+Eigen::Matrix3d
+so3_right_jacobian(const Eigen::Vector3d &vector)
+{
+    return so3_left_jacobian(-vector);                                                               // J_r(r) = J_l(-r)
+}
+
+Eigen::Matrix3d
+so3_left_jacobian_inverse(const Eigen::Vector3d &vector)
+{
+    const double theta = vector.norm();
+    const Eigen::Matrix3d W = SkewSymmetric(vector).as_matrix();
+
+    // J_l^{-1} = I - 0.5*W + c*W^2,  c = 1/t^2 - (1 + cos t)/(2 t sin t)  (-> 1/12 as t -> 0)
+    // The (1 + cos t)/sin t form cancels catastrophically near t = pi (both -> 0), so use the
+    // equivalent and well-conditioned half-angle form (1 + cos t)/sin t = cot(t/2) instead.
+    double c;
+    if(theta < 1e-6)
+    {
+        c = 1.0 / 12.0 + theta * theta / 720.0;
+    }
+    else
+    {
+        const double half = 0.5 * theta;
+        c = 1.0 / (theta * theta) - std::cos(half) / (2.0 * theta * std::sin(half));
+    }
+
+    return Eigen::Matrix3d::Identity() - 0.5 * W + c * W * W;
+}
+
+Eigen::Matrix3d
+so3_right_jacobian_inverse(const Eigen::Vector3d &vector)
+{
+    return so3_left_jacobian_inverse(-vector);                                                       // J_r^{-1}(r) = J_l^{-1}(-r)
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                            Exponential map of SE(3): body twist -> T                            //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix4d
+se3_exponential(const Eigen::Matrix<double,6,1> &twist)
+{
+    const Eigen::Vector3d v = twist.head<3>();
+    const Eigen::Vector3d w = twist.tail<3>();
+
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    T.block<3,3>(0,0) = so3_exponential(w);
+    T.block<3,1>(0,3) = so3_left_jacobian(w) * v;                                                    // p = V * v, with V = J_l (matches se3_logarithm's Vinv = J_l^{-1})
+    return T;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                                  Adjoint of an SE(3) transform                                  //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Matrix<double,6,6>
+adjoint(const Eigen::Matrix4d &T)
+{
+    const Eigen::Matrix3d R = T.block<3,3>(0,0);
+    const Eigen::Vector3d p = T.block<3,1>(0,3);
+
+    Eigen::Matrix<double,6,6> Ad = Eigen::Matrix<double,6,6>::Zero();
+    Ad.block<3,3>(0,0) = R;
+    Ad.block<3,3>(0,3) = SkewSymmetric(p).as_matrix() * R;                                           // [v;w] ordering: top-right block is [p]x * R
+    Ad.block<3,3>(3,3) = R;
+    return Ad;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                              Quaternion -> shortest rotation vector                             //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Vector3d
+quaternion_to_rotation_vector(const Eigen::Quaterniond &quaternion)
+{
+    Eigen::Quaterniond q = quaternion;
+    q.normalize();
+
+    if(not std::isfinite(q.w()) or not q.vec().allFinite()) return Eigen::Vector3d::Zero();
+
+    if(q.w() < 0.0) q.coeffs() *= -1.0;                                                              // Shortest path (w >= 0 hemisphere)
+
+    const Eigen::Vector3d v = q.vec();
+    const double vNorm = v.norm();
+    if(vNorm < 1e-8) return Eigen::Vector3d::Zero();
+
+    const double angle = 2.0 * std::atan2(vNorm, q.w());
+    return angle * v / vNorm;
+}
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //                       Orientation error (world frame) as a rotation vector                      //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+Eigen::Vector3d
+quaternion_orientation_error(const Eigen::Quaterniond &current,
+                             const Eigen::Quaterniond &desired)
+{
+    return quaternion_to_rotation_vector(desired * current.conjugate());                             // log( q_d * q_c^{-1} )
 }
 
 } }
