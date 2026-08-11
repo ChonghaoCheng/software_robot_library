@@ -1,0 +1,5 @@
+build/
+build_*/
+install/
+install_*/
+log/

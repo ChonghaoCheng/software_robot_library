@@ -1,2 +1,0 @@
-/usr/bin/ar qc libTrajectory.a CMakeFiles/Trajectory.dir/src/CartesianSpline.cpp.o CMakeFiles/Trajectory.dir/src/MinimumArcLength.cpp.o CMakeFiles/Trajectory.dir/src/SplineTrajectory.cpp.o CMakeFiles/Trajectory.dir/src/TrajectoryBase.cpp.o CMakeFiles/Trajectory.dir/src/TrapezoidalVelocity.cpp.o
-/usr/bin/ranlib libTrajectory.a

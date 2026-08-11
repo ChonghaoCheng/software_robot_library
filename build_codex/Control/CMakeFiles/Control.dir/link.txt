@@ -1,2 +1,0 @@
-/usr/bin/ar qc libControl.a CMakeFiles/Control.dir/src/SerialLinkBase.cpp.o CMakeFiles/Control.dir/src/SerialLinkImpedance.cpp.o CMakeFiles/Control.dir/src/SerialLinkKinematic.cpp.o CMakeFiles/Control.dir/src/SerialLinkMPC.cpp.o CMakeFiles/Control.dir/src/SerialLinkMPCC.cpp.o
-/usr/bin/ranlib libControl.a

@@ -1,2 +1,0 @@
-/usr/bin/ar qc libMath.a CMakeFiles/Math.dir/src/MathFunctions.cpp.o CMakeFiles/Math.dir/src/Polynomial.cpp.o CMakeFiles/Math.dir/src/SkewSymmetric.cpp.o CMakeFiles/Math.dir/src/Spline.cpp.o
-/usr/bin/ranlib libMath.a
