@@ -87,8 +87,8 @@ struct RmpccParameters
     // Riemannian tracking
     RmpccPredictorGeometry predictorGeometry = RmpccPredictorGeometry::ExactSE3;
     RmpccObjectiveGeometry objectiveGeometry = RmpccObjectiveGeometry::FullScrewSE3;
-    double lagWeight                 = 10.0;     ///< Weight on the along-path (lag) error component
-    double rotationCharacteristicLength = 0.0;  ///< m/rad used to scale rotational coordinates; 0 keeps metric as supplied
+    double lagWeight                 = 10.0;     ///< Front-end convenience only; controller uses lagWeightMatrix
+    double rotationCharacteristicLength = 0.0;  ///< Front-end convenience only; controller uses metric exactly as supplied
     double terminalPositionMultiplier = 1.0;    ///< Extra terminal contour weight for translation
     double terminalRotationMultiplier = 1.0;    ///< Extra terminal contour weight for rotation
     double terminalLagMultiplier      = 1.0;    ///< Extra terminal weight for the scalar lag component

@@ -123,7 +123,12 @@ SerialLinkRMPCC::objective_description() const
     }
     stream << "; path_velocity=sum ||u-Ad(E^-1)*tau*sdot||_Rv^2"
            << "; input=sum ||u||_Ru^2; rate=sum ||Delta u||_Rdu^2"
-           << "; progress_reward=-q_s*dt*sum(sdot); terminal=last-stage multipliers";
+           << "; progress_reward=-q_s*dt*sum(sdot); terminal=last-stage multipliers"
+           << "; effective_metric_diag=[" << _rmpcc.metric.diagonal().transpose() << "]"
+           << "; effective_contour_weight_diag=["
+           << _rmpcc.contourWeight.diagonal().transpose() << "]"
+           << "; effective_lag_weight_diag=["
+           << _rmpcc.lagWeightMatrix.diagonal().transpose() << "]";
     return stream.str();
 }
 
