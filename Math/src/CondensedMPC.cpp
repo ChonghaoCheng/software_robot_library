@@ -64,6 +64,59 @@ condense_prediction(const Eigen::MatrixXd &A,
     return result;
 }
 
+CondensedPrediction
+condense_time_varying_prediction(const std::vector<Eigen::MatrixXd> &A,
+                                 const std::vector<Eigen::MatrixXd> &B)
+{
+    if(A.empty() or A.size() != B.size())
+    {
+        throw std::invalid_argument(
+            "[ERROR] [CONDENSE TIME-VARYING PREDICTION] A and B must have the same non-zero length.");
+    }
+
+    const int nx = static_cast<int>(A.front().rows());
+    const int nu = static_cast<int>(B.front().cols());
+    const int N = static_cast<int>(A.size());
+    for(int k = 0; k < N; ++k)
+    {
+        if(A[static_cast<size_t>(k)].rows() != nx
+           or A[static_cast<size_t>(k)].cols() != nx
+           or B[static_cast<size_t>(k)].rows() != nx
+           or B[static_cast<size_t>(k)].cols() != nu)
+        {
+            throw std::invalid_argument(
+                "[ERROR] [CONDENSE TIME-VARYING PREDICTION] Inconsistent stage dimensions.");
+        }
+    }
+
+    CondensedPrediction result;
+    result.stateTransition = Eigen::MatrixXd::Zero(N * nx, nx);
+    result.inputResponse = Eigen::MatrixXd::Zero(N * nx, N * nu);
+
+    Eigen::MatrixXd transition = Eigen::MatrixXd::Identity(nx, nx);
+    for(int k = 0; k < N; ++k)
+    {
+        const Eigen::MatrixXd &Ak = A[static_cast<size_t>(k)];
+        const Eigen::MatrixXd &Bk = B[static_cast<size_t>(k)];
+        transition = Ak * transition;
+        result.stateTransition.block(k * nx, 0, nx, nx) = transition;
+
+        for(int j = 0; j <= k; ++j)
+        {
+            if(j == k)
+            {
+                result.inputResponse.block(k * nx, j * nu, nx, nu) = Bk;
+            }
+            else
+            {
+                result.inputResponse.block(k * nx, j * nu, nx, nu) =
+                    Ak * result.inputResponse.block((k - 1) * nx, j * nu, nx, nu);
+            }
+        }
+    }
+    return result;
+}
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                          Replicate a square block along the diagonal                           //
 ////////////////////////////////////////////////////////////////////////////////////////////////////

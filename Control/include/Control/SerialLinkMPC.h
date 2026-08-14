@@ -23,8 +23,9 @@
 #ifndef SERIAL_LINK_MPC_H
 #define SERIAL_LINK_MPC_H
 
-#include <Control/SerialLinkVelocityBase.h>
+#include <Control/SerialLinkTimeIndexedMPC.h>
 #include <Trajectory/CartesianSpline.h>
+#include <Trajectory/CartesianTrajectoryFrame.h>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -39,7 +40,7 @@ namespace RobotLibrary { namespace Control {
  * desired endpoint twist over a finite prediction horizon and then maps it to
  * joint velocities using the shared resolved-rate velocity layer.
  */
-class SerialLinkMPC : public SerialLinkVelocityBase
+class SerialLinkMPC : public SerialLinkTimeIndexedMPC
 {
     public:
 
@@ -76,19 +77,24 @@ class SerialLinkMPC : public SerialLinkVelocityBase
          * the MPC horizon to sample the real future reference poses/twists.
          */
         void
-        set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory);
+        set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory) override;
+
+        /** Set the current pose/twist of the trajectory parent frame in base. */
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame) override;
 
         /**
          * @brief Clear the currently stored trajectory and warm start.
          */
         void
-        clear_trajectory();
+        clear_trajectory() override;
 
         /**
          * @brief True when a trajectory has been supplied through set_trajectory().
          */
         bool
-        has_trajectory() const { return _trajectorySet; }
+        has_trajectory() const override { return _trajectorySet; }
 
         /**
          * @brief Track the stored time-indexed Cartesian trajectory at the given time.
@@ -98,7 +104,16 @@ class SerialLinkMPC : public SerialLinkVelocityBase
          * current reference point.
          */
         Eigen::VectorXd
-        track_endpoint_trajectory_at_time(const double &time);
+        track_endpoint_trajectory_at_time(const double &time) override;
+
+        /**
+         * @brief Match the unconstrained local feedback bandwidth to target gains.
+         *
+         * Uses exact discrete-integrator LQR stage and Riccati terminal weights.
+         * Baseline behaviour is unchanged until this method is called.
+         */
+        void set_feedback_bandwidth(double positionGain,
+                                    double orientationGain);
 
     protected:
 
@@ -114,12 +129,19 @@ class SerialLinkMPC : public SerialLinkVelocityBase
         double _wLinearVelocity  = 0.1;     ///< Weight on linear velocity deviation (per axis).
         double _wAngularVelocity = 0.1;     ///< Weight on angular velocity deviation (per axis).
 
+        Eigen::Matrix<double,6,6> _terminalStateWeight =
+            Eigen::Matrix<double,6,6>::Zero();
+        bool _useTerminalStateWeight = false;
+
         // Cartesian velocity limits:
         double _maxLinearSpeed   = 0.5;     ///< Max linear speed [m/s] for each axis.
         double _maxAngularSpeed  = 0.5;     ///< Max angular speed [rad/s] for each axis.
 
         /// Optional full reference trajectory used by the time-indexed MPC API.
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
+
+        /// Current trajectory-parent state; identity preserves absolute trajectories.
+        RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
 
         /// True after set_trajectory() has been called.
         bool _trajectorySet = false;

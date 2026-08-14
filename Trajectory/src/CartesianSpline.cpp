@@ -58,7 +58,12 @@ CartesianSpline::CartesianSpline(const std::vector<RobotLibrary::Model::Pose> &p
         else                    positions[i].tail(3) = angle * poses[i].quaternion().vec().normalized();
     }
     
-    this->_spline = SplineTrajectory(positions,times,startTwist);                                   // Generates a cubic spline. Velocities automatically calculated.  
+    Eigen::Vector<double,6> startCoordinateVelocity = startTwist;
+    startCoordinateVelocity.tail<3>() =
+        RobotLibrary::Math::so3_left_jacobian_inverse(positions.front().tail<3>())
+        * startTwist.tail<3>();
+
+    this->_spline = SplineTrajectory(positions,times,startCoordinateVelocity);                      // Internal angular coordinates are rotation-vector derivatives.
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -88,7 +93,31 @@ CartesianSpline::query_state(const double &time)
                                                           sin(0.5*angle)*axis(2)));
     }
 
-    RobotLibrary::Trajectory::CartesianState returnValue = {pose, state.velocity, state.acceleration};   // Put them together in data structur
+    const Eigen::Vector3d rotationVector = state.position.tail<3>();
+    const Eigen::Vector3d rotationVectorRate = state.velocity.tail<3>();
+    const Eigen::Matrix3d leftJacobian =
+        RobotLibrary::Math::so3_left_jacobian(rotationVector);
+
+    Eigen::Vector<double,6> physicalTwist = state.velocity;
+    physicalTwist.tail<3>() = leftJacobian * rotationVectorRate;
+
+    // alpha = J_l(r) rddot + Jdot_l(r, rdot) rdot. A centred directional
+    // derivative keeps this consistent with the existing SO(3) Jacobian implementation.
+    constexpr double derivativeStep = 1e-6;
+    const Eigen::Matrix3d jacobianPlus = RobotLibrary::Math::so3_left_jacobian(
+        rotationVector + derivativeStep * rotationVectorRate);
+    const Eigen::Matrix3d jacobianMinus = RobotLibrary::Math::so3_left_jacobian(
+        rotationVector - derivativeStep * rotationVectorRate);
+    const Eigen::Matrix3d leftJacobianRate =
+        (jacobianPlus - jacobianMinus) / (2.0 * derivativeStep);
+
+    Eigen::Vector<double,6> physicalAcceleration = state.acceleration;
+    physicalAcceleration.tail<3>() =
+        leftJacobian * state.acceleration.tail<3>()
+        + leftJacobianRate * rotationVectorRate;
+
+    RobotLibrary::Trajectory::CartesianState returnValue =
+        {pose, physicalTwist, physicalAcceleration};
 
     return returnValue;
 }

@@ -42,7 +42,8 @@ class CartesianSpline
          * @brief Constructor for cubic splines.
          * @poses An array of poses (position & orientation) to pass through.
          * @times The time at which to pass through each pose.
-         * @startTwist The initial linear & angular velocity.
+         * @startTwist Initial physical point linear/angular velocity, expressed in
+         *             the same parent frame as poses.
          */
         CartesianSpline(const std::vector<RobotLibrary::Model::Pose> &poses,
                         const std::vector<double> &times,
@@ -65,7 +66,7 @@ class CartesianSpline
                         std::vector<double>{startTime, endTime},
                         startTwist) {}
         /**
-         * @brief Get the state for the given time.
+         * @brief Get pose, physical twist and acceleration in the trajectory parent frame.
          */
         RobotLibrary::Trajectory::CartesianState
         query_state(const double &time);

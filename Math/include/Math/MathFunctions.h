@@ -110,6 +110,27 @@ Eigen::Matrix<double,6,1>
 se3_logarithm(const Eigen::Matrix4d &T);
 
 /**
+ * @brief Lie-algebra adjoint ad_xi for an SE(3) twist ordered [v; w].
+ * @details ad_xi * eta is the Lie bracket [xi, eta].
+ */
+Eigen::Matrix<double,6,6>
+se3_adjoint_matrix(const Eigen::Matrix<double,6,1> &twist);
+
+/**
+ * @brief Right Jacobian of SE(3), mapping log-coordinate rate to body twist.
+ * @details xi_body = J_r(e) * e_dot for T = Exp(e).
+ */
+Eigen::Matrix<double,6,6>
+se3_right_jacobian(const Eigen::Matrix<double,6,1> &twist);
+
+/**
+ * @brief Inverse right Jacobian of SE(3): e_dot = J_r(e)^-1 * xi_body.
+ * @throws std::runtime_error if the Jacobian is numerically singular.
+ */
+Eigen::Matrix<double,6,6>
+se3_right_jacobian_inverse(const Eigen::Matrix<double,6,1> &twist);
+
+/**
  * @brief Inverse of a homogeneous SE(3) transform (uses the block structure, not a generic inverse).
  * @param T A 4x4 homogeneous transform.
  * @return The inverse transform.

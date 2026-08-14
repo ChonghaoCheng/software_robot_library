@@ -6,6 +6,8 @@ project(RobotLibrary
         VERSION 1.0
         LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

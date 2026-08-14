@@ -4,8 +4,7 @@
  *
  * @details This class implements a model predictive contouring control (MPCC)
  *          formulation in a local Cartesian frame. The controller stores the
- *          complete reference path, while the caller supplies the externally
- *          estimated closest progress at every control step.
+ *          complete time-indexed reference and owns the virtual path progress.
  *
  *          Error:            e = [position_error; rotation_vector_error]
  *          Control:          u = [linear_velocity; angular_velocity]
@@ -18,12 +17,39 @@
 
 #include <Control/SerialLinkVelocityBase.h>
 #include <Trajectory/CartesianSpline.h>
+#include <Trajectory/CartesianTrajectoryFrame.h>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <memory>
 
 namespace RobotLibrary { namespace Control {
+
+enum class MpccAblationProfile
+{
+    Baseline,
+    FreeProgress,
+    OptimizedProgress,
+    FeedforwardCorrection,
+    MatchedFeedbackGain
+};
+
+struct MpccDiagnostics
+{
+    Eigen::Vector<double,6> error = Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> bodyTwist = Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> realizedBodyTwist = Eigen::Vector<double,6>::Zero();
+    double progressRate = 0.0;
+    double referenceProgress = 0.0;
+    double nextProgress = 0.0;
+    double positionError = 0.0;
+    double orientationError = 0.0;
+    double qpStatus = 1.0;
+    double qpIterations = 0.0;
+    double qpFinalStepSize = 0.0;
+    double qpObjective = 0.0;
+    double twistRealizationError = 0.0;
+};
 
 class SerialLinkMPCC : public SerialLinkVelocityBase
 {
@@ -40,7 +66,7 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
                        const std::string &endpointName,
                        const RobotLibrary::Control::SerialLinkParameters &parameters = SerialLinkParameters(),
                        unsigned int horizon = 20,
-                       double dt = 0.005);
+                       double dt = 0.0);
 
         /**
          * @brief Unsupported single-pose interface required by SerialLinkBase.
@@ -57,19 +83,31 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         void
         set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &trajectory);
 
-        /**
-         * @brief Run one MPCC step from an externally estimated closest progress.
-         * @param dt Control step [s].
-         * @param estimatedProgress Current closest path progress in [0,1].
-         */
+        /** Configure a reproducible objective/progress ablation before set_trajectory(). */
+        void
+        set_ablation_profile(MpccAblationProfile profile);
+
+        /** Set the rigid trajectory parent pose/twist in the robot base frame. */
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame);
+
+        /** Run one MPCC step using internally integrated virtual progress. */
+        Eigen::VectorXd
+        step(double dt);
+
+        /** Compatibility entry point with an externally supplied initial progress. */
         Eigen::VectorXd
         step(double dt, double estimatedProgress);
 
         /**
-         * @brief Most recent externally supplied path progress.
+         * @brief Current internally integrated path progress.
          */
         double
         path_progress() const { return _pathProgress; }
+
+        const MpccDiagnostics &
+        diagnostics() const { return _diagnostics; }
 
     protected:
         /**
@@ -113,15 +151,24 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         double _vProgressMax = 0.1;
         double _vProgressMin = 0.001;
 
+        // Local small-error bandwidth of the classic controller.  Its
+        // quaternion-vector orientation error is approximately theta/2.
+        double _matchedPositionGain = 20.0;
+        double _matchedOrientationGain = 2.5;
+
+        MpccAblationProfile _ablationProfile = MpccAblationProfile::Baseline;
+
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
+        RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
         bool _trajectorySet = false;
 
-        // The external estimate is authoritative; predicted progress exists only in the QP.
+        // Controller-owned progress; future progress is predicted inside the QP.
         double _pathProgress = 0.0;
         Eigen::Vector<double,NU> _uLast = Eigen::Vector<double,NU>::Zero();
         Eigen::VectorXd _warmStart;
 
         QPSolver<double> _qpSolver;
+        MpccDiagnostics _diagnostics;
 
         Eigen::Vector<double,NU>
         solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,

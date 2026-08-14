@@ -28,9 +28,9 @@ namespace RobotLibrary { namespace Trajectory {
  */
 struct CartesianState
 {
-     RobotLibrary::Model::Pose pose;                                                                ///< Does this really need an explanation?
-     Eigen::Vector<double,6>   twist;                                                               ///< Linear and angular velocity
-     Eigen::Vector<double,6>   acceleration;                                                        ///<  Linear and angular acceleration
+     RobotLibrary::Model::Pose pose;                                                                ///< Pose in the trajectory parent frame
+     Eigen::Vector<double,6>   twist;                                                               ///< Point linear/angular velocity in the same parent frame
+     Eigen::Vector<double,6>   acceleration;                                                        ///< Point linear/angular acceleration in the same parent frame
 };                                                                                                  // Semicolon needed after declaration
 
 

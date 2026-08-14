@@ -13,6 +13,12 @@ target_include_directories(Trajectory PUBLIC
 
 target_link_libraries(Trajectory PUBLIC Math Model Eigen3::Eigen)
 
+if(BUILD_TESTING)
+    add_executable(cartesian_trajectory_frame_test test/CartesianTrajectoryFrame.cpp)
+    target_link_libraries(cartesian_trajectory_frame_test PRIVATE Trajectory)
+    add_test(NAME cartesian_trajectory_frame_test COMMAND cartesian_trajectory_frame_test)
+endif()
+
 install(TARGETS  Trajectory
         EXPORT   TrajectoryTargets
         LIBRARY  DESTINATION lib

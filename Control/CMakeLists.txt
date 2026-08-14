@@ -10,6 +10,7 @@ add_library(Control src/AdmittanceContactController.cpp
                     src/SerialLinkMPCC.cpp
                     src/SerialLinkCartesianMPCC.cpp
                     src/SerialLinkMPC.cpp
+                    src/SerialLinkLieAlgebraMPC.cpp
                     src/SerialLinkMovingFrameMPC.cpp
                     src/SerialLinkRMPCC.cpp
 )
@@ -21,6 +22,24 @@ target_include_directories(Control PUBLIC
 )
 
 target_link_libraries(Control PUBLIC Math Model Trajectory Eigen3::Eigen)                           # Other libraries needed to compile this one
+
+if(BUILD_TESTING)
+    add_executable(rmpcc_prediction_test test/RmpccPrediction.cpp)
+    target_link_libraries(rmpcc_prediction_test PRIVATE Control)
+    add_test(NAME rmpcc_prediction_test COMMAND rmpcc_prediction_test)
+
+    add_executable(lie_algebra_mpc_prediction_test test/LieAlgebraMPCPrediction.cpp)
+    target_link_libraries(lie_algebra_mpc_prediction_test PRIVATE Control)
+    add_test(NAME lie_algebra_mpc_prediction_test COMMAND lie_algebra_mpc_prediction_test)
+
+    add_executable(cartesian_mpcc_prediction_test test/CartesianMPCCPrediction.cpp)
+    target_link_libraries(cartesian_mpcc_prediction_test PRIVATE Control)
+    add_test(NAME cartesian_mpcc_prediction_test COMMAND cartesian_mpcc_prediction_test)
+
+    add_executable(rmpcc_cost_geometry_test test/RmpccCostGeometry.cpp)
+    target_link_libraries(rmpcc_cost_geometry_test PRIVATE Control)
+    add_test(NAME rmpcc_cost_geometry_test COMMAND rmpcc_cost_geometry_test)
+endif()
 
 # Installation instructions
 install(TARGETS  Control

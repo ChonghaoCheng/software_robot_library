@@ -316,6 +316,53 @@ se3_logarithm(const Eigen::Matrix4d &T)
     return twist;
 }
 
+Eigen::Matrix<double,6,6>
+se3_adjoint_matrix(const Eigen::Matrix<double,6,1> &twist)
+{
+    const Eigen::Matrix3d V = SkewSymmetric(twist.head<3>()).as_matrix();
+    const Eigen::Matrix3d W = SkewSymmetric(twist.tail<3>()).as_matrix();
+
+    Eigen::Matrix<double,6,6> ad = Eigen::Matrix<double,6,6>::Zero();
+    ad.block<3,3>(0,0) = W;
+    ad.block<3,3>(0,3) = V;
+    ad.block<3,3>(3,3) = W;
+    return ad;
+}
+
+Eigen::Matrix<double,6,6>
+se3_right_jacobian(const Eigen::Matrix<double,6,1> &twist)
+{
+    using Matrix6d = Eigen::Matrix<double,6,6>;
+    const Matrix6d negativeAd = -se3_adjoint_matrix(twist);
+
+    // J_r(e) = sum_{n=0}^infinity (-ad_e)^n / (n+1)!.
+    // The logarithm uses the shortest SO(3) branch, so a short fixed series is
+    // accurate throughout the controller's nonsingular operating region.
+    Matrix6d jacobian = Matrix6d::Identity();
+    Matrix6d term = Matrix6d::Identity();
+    for(int order = 1; order <= 24; ++order)
+    {
+        term = term * negativeAd / static_cast<double>(order + 1);
+        jacobian += term;
+        if(term.norm() < 1e-15) break;
+    }
+    return jacobian;
+}
+
+Eigen::Matrix<double,6,6>
+se3_right_jacobian_inverse(const Eigen::Matrix<double,6,1> &twist)
+{
+    using Matrix6d = Eigen::Matrix<double,6,6>;
+    const Matrix6d jacobian = se3_right_jacobian(twist);
+    const Eigen::FullPivLU<Matrix6d> decomposition(jacobian);
+    if(not decomposition.isInvertible())
+    {
+        throw std::runtime_error(
+            "[ERROR] [MATH FUNCTIONS] se3_right_jacobian_inverse(): Jacobian is singular.");
+    }
+    return decomposition.solve(Matrix6d::Identity());
+}
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                              Inverse of a homogeneous SE(3) transform                           //
 ////////////////////////////////////////////////////////////////////////////////////////////////////

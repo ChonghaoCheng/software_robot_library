@@ -729,7 +729,8 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
          
         if (stepSize <= _options.stepSizeTolerance)
         {
-            DataType smallestMultiplier = -1e-06;                                                   // Tiny negative number to account for floating point error?
+            // lambda is the negative of the conventional inequality KKT multiplier.
+            DataType largestMultiplier = 1e-06;
             
             int freeConstraint = -1;                                                                // Use this to track which constraint is most negative
             
@@ -737,10 +738,10 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
             {
                 int index = numEqualConstraints + j;                                                // We need to offset the index for all permanent equality constraints
                 
-                if (lambda[index] < smallestMultiplier)
+                if (lambda[index] > largestMultiplier)
                 {
-                    smallestMultiplier = lambda[index];                                             // Save the value
-                        freeConstraint = j;                                                         // Remove jth constraint from active set
+                    largestMultiplier = lambda[index];
+                    freeConstraint = j;                                                             // Remove jth constraint from active set
                 }
             }
             
@@ -776,8 +777,6 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                 }
             }
             
-            if (alpha * stepSize < _options.stepSizeTolerance) break;                               // Step change is super, duper tiny
-                
             x += alpha * dx;                                                                        // Take a step toward optimal solution   
              
             // An inactive constraint blocked us, so add to active set for next loop

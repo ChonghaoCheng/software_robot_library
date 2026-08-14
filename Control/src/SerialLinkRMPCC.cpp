@@ -4,18 +4,20 @@
  */
 
 #include <Control/SerialLinkRMPCC.h>
+#include <Control/RmpccPrediction.h>
 #include <Math/MathFunctions.h>
 
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
 using RobotLibrary::Math::se3_logarithm;
 using RobotLibrary::Math::se3_inverse;
-using RobotLibrary::Math::so3_logarithm;
 
 namespace RobotLibrary { namespace Control {
 
@@ -43,19 +45,6 @@ RobotLibrary::Model::Pose matrix_to_pose(const Eigen::Matrix4d &T)
     return RobotLibrary::Model::Pose(T.block<3,1>(0,3), q);
 }
 
-// World-frame pose error using axis-angle (so3 logarithm) for orientation, consistent
-// with the se3 logarithm convention used inside the QP.
-Eigen::Vector<double,6> pose_feedback_error(const RobotLibrary::Model::Pose &current,
-                                            const RobotLibrary::Model::Pose &desired)
-{
-    Eigen::Vector<double,6> error = Eigen::Vector<double,6>::Zero();
-    error.head<3>() = desired.translation() - current.translation();
-    const Eigen::Matrix3d R_err =
-        desired.quaternion().toRotationMatrix() * current.quaternion().inverse().toRotationMatrix();
-    error.tail<3>() = so3_logarithm(R_err);
-    return error;
-}
-
 } // anonymous namespace
 
 SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
@@ -64,12 +53,36 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
                                  const RmpccParameters &rmpcc)
 : SerialLinkVelocityBase(model, endpointName, parameters),
   _rmpcc(rmpcc),
+  _deriveProgressRateMin(rmpcc.progressRateMin <= 0.0),
+  _deriveProgressRateMax(rmpcc.progressRateMax <= 0.0),
   _qpSolver(parameters.qpsolver)
 {
     if(_rmpcc.horizonSteps < 1)
     {
         _rmpcc.horizonSteps = 1;
     }
+    if(not std::isfinite(_rmpcc.rtiFiniteDifferenceStep)
+       or _rmpcc.rtiFiniteDifferenceStep <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] rtiFiniteDifferenceStep must be positive.");
+    }
+    const auto validateCostScale = [](const double scale, const char *name)
+    {
+        if(not std::isfinite(scale) or scale < 0.0)
+        {
+            throw std::invalid_argument(
+                std::string("[ERROR] [SERIAL LINK RMPCC] ") + name
+                + " must be finite and non-negative.");
+        }
+    };
+    validateCostScale(_rmpcc.runningContourScale, "runningContourScale");
+    validateCostScale(_rmpcc.runningLagScale, "runningLagScale");
+    validateCostScale(_rmpcc.runningLagTranslationScale, "runningLagTranslationScale");
+    validateCostScale(_rmpcc.runningLagRotationScale, "runningLagRotationScale");
+    validateCostScale(_rmpcc.terminalLagTranslationScale, "terminalLagTranslationScale");
+    validateCostScale(_rmpcc.terminalLagRotationScale, "terminalLagRotationScale");
+    validateCostScale(_rmpcc.pathVelocityScale, "pathVelocityScale");
     _lastProgressRate = _rmpcc.progressRateRef;
 }
 
@@ -85,7 +98,32 @@ SerialLinkRMPCC::track_endpoint_trajectory(const RobotLibrary::Model::Pose &desi
     throw std::logic_error(
         "[ERROR] [SERIAL LINK RMPCC] track_endpoint_trajectory(): "
         "Single-pose tracking is not RMPCC. "
-        "Call set_trajectory() and then step(dt, estimatedProgress).");
+        "Call set_trajectory() and then step(dt).");
+}
+
+std::string
+SerialLinkRMPCC::objective_description() const
+{
+    std::ostringstream stream;
+    stream << "predictor="
+           << (_rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3
+               ? "exact_se3: E[k+1]=Tref(s[k+1])^-1*Tref(s[k])*E[k]*Exp(dt*u[k])"
+               : "additive: e[k+1]=e[k]+dt*(Jr(e[k])^-1*u[k]-g(e[k],s[k])*sdot[k])")
+           << "; objective=";
+    if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+    {
+        stream << "sum ||(I-P_tau)e||_Qc^2+||P_tau*e||_Ql^2"
+               << ", P_tau=g*(g^T*M)/(g^T*M*g)";
+    }
+    else
+    {
+        stream << "sum ||(I-tp*tp^T)e_p||_Qcp^2+||tp*tp^T*e_p||_Qlp^2"
+               << "+||Log(Rref^T*R)||_QR^2; orientation is not projected onto progress";
+    }
+    stream << "; path_velocity=sum ||u-Ad(E^-1)*tau*sdot||_Rv^2"
+           << "; input=sum ||u||_Ru^2; rate=sum ||Delta u||_Rdu^2"
+           << "; progress_reward=-q_s*dt*sum(sdot); terminal=last-stage multipliers";
+    return stream.str();
 }
 
 void
@@ -108,12 +146,25 @@ SerialLinkRMPCC::set_trajectory(const RobotLibrary::Trajectory::CartesianSpline 
                                              _rmpcc.autoProgressRateMin,
                                              _rmpcc.autoProgressRateMax);
     }
-    if(_rmpcc.progressRateMax <= 0.0)
+    if(_deriveProgressRateMin)
+    {
+        _rmpcc.progressRateMin =
+            _rmpcc.progressRateRef * _rmpcc.progressRateMinMultiplier;
+    }
+    if(_deriveProgressRateMax)
     {
         _rmpcc.progressRateMax = _rmpcc.progressRateRef * _rmpcc.progressRateMaxMultiplier;
     }
     _rmpcc.progressRateMax = std::max(_rmpcc.progressRateMax, _rmpcc.progressRateRef);
     _lastProgressRate = _rmpcc.progressRateRef;
+}
+
+void
+SerialLinkRMPCC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
 }
 
 void
@@ -134,29 +185,36 @@ SerialLinkRMPCC::reset()
     _pathProgress = 0.0;
     _lastProgressRate = _rmpcc.progressRateRef;
     _lastBodyTwist.setZero();
+    _predictedNextError.setZero();
+    _predictionValid = false;
     _warmStart.resize(0);
     _scheduleProgressLimit = 1.0;
     _diagnostics = RmpccDiagnostics();
 }
 
 Eigen::Matrix4d
-SerialLinkRMPCC::reference_transform(double progress)
+SerialLinkRMPCC::active_frame_transform_in_base() const
 {
-    // Nominal path geometry comes from the trajectory; the rigid disturbance is a
-    // controller-level concern applied on top (it cancels in the tangent, only shifts e0).
-    return _disturbance * pose_to_matrix(_trajectory.pose_at_progress(progress));
+    return _disturbance * _trajectoryFrame.transformInBase;
+}
+
+Eigen::Matrix4d
+SerialLinkRMPCC::reference_transform_in_trajectory_frame(double progress)
+{
+    return pose_to_matrix(_trajectory.pose_at_progress(progress));
+}
+
+Eigen::Matrix4d
+SerialLinkRMPCC::reference_transform_in_base(double progress)
+{
+    return active_frame_transform_in_base()
+           * reference_transform_in_trajectory_frame(progress);
 }
 
 RobotLibrary::Model::Pose
 SerialLinkRMPCC::reference_pose(double progress)
 {
-    return matrix_to_pose(reference_transform(progress));
-}
-
-Eigen::Vector<double, SerialLinkRMPCC::TWIST_DIM>
-SerialLinkRMPCC::body_twist_reference_at_progress(double progress)
-{
-    return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep) * _rmpcc.progressRateRef;
+    return matrix_to_pose(reference_transform_in_base(progress));
 }
 
 Eigen::VectorXd
@@ -205,10 +263,14 @@ SerialLinkRMPCC::clipped_warm_start(const Eigen::VectorXd &seed,
 }
 
 void
-SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransform, const double dt)
+SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectoryFrame,
+                             const double dt)
 {
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
+
+    _diagnostics.qpStatus = 0.0;
+    _diagnostics.fallbackUsed = false;
 
     const int N = _rmpcc.horizonSteps;
     const int variableDim = 7 * N;
@@ -218,130 +280,57 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransform, const doub
     const double scheduleRemaining =
         std::max(0.0, _scheduleProgressLimit + _rmpcc.progressScheduleSlack - _pathProgress);
 
-    const Eigen::Matrix4d referenceTransform = reference_transform(_pathProgress);
-    const Eigen::Vector<double, TWIST_DIM> e0 = se3_logarithm(se3_inverse(referenceTransform) * currentTransform);
+    // Both operands are expressed directly in the active trajectory frame.
+    // Their relative transform is invariant to the frame's base transform.
+    const Eigen::Matrix4d currentReferenceTransform =
+        reference_transform_in_trajectory_frame(_pathProgress);
+    const Eigen::Matrix4d relativeTransform =
+        se3_inverse(currentReferenceTransform) * currentTransformInTrajectoryFrame;
+    const Eigen::Vector<double, TWIST_DIM> e0 = se3_logarithm(relativeTransform);
+    _diagnostics.referenceProgress = _pathProgress;
+    _diagnostics.modelPredictionResidual =
+        _predictionValid ? (e0 - _predictedNextError).norm() : 0.0;
+    _diagnostics.se3Error = e0;
+    _diagnostics.realizedOneStepErrorNorm = e0.norm();
     const double se3ErrorNorm = e0.norm();
     const double rotationError = e0.tail<3>().norm();
-    const Eigen::Vector<double, TWIST_DIM> currentTau = _trajectory.tangent_at_progress(_pathProgress, _rmpcc.tangentStep);
-    const double currentTauMetric = (currentTau.transpose() * _rmpcc.metric * currentTau)(0);
-    const double currentDenom = std::max(currentTauMetric, _rmpcc.hessianRegularization);
-    const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> currentLagProjection =
-        currentTau * (currentTau.transpose() * _rmpcc.metric) / currentDenom;
-    const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> currentContourProjection =
-        Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity() - currentLagProjection;
-    const double currentContourError = (currentContourProjection * e0).norm();
+    const Eigen::Vector<double, TWIST_DIM> currentTau =
+        _trajectory.tangent_at_progress(_pathProgress, _rmpcc.tangentStep);
+    const Eigen::Vector<double, TWIST_DIM> currentErrorTangent =
+        rmpcc_error_coordinate_path_tangent(e0, currentTau);
+    // Preserve the legacy signed full-screw lag diagnostic even when the
+    // running cost uses independent translational/rotational projectors.
+    const double currentTauMetric =
+        (currentErrorTangent.transpose() * _rmpcc.metric * currentErrorTangent)(0);
+    const double currentDenom =
+        std::max(currentTauMetric, _rmpcc.hessianRegularization);
+    RmpccErrorProjection currentProjection;
+    Eigen::Vector<double,TWIST_DIM> currentCostError = e0;
+    if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+    {
+        currentProjection = rmpcc_error_projection(
+            currentErrorTangent, _rmpcc.metric, _rmpcc.runningLagGeometry,
+            _rmpcc.hessianRegularization);
+    }
+    else
+    {
+        currentCostError = rmpcc_decoupled_error(e0);
+        const Eigen::Vector3d positionTangent = currentTau.head<3>();
+        const Eigen::Matrix3d positionLag = rmpcc_metric_projection<3>(
+            positionTangent, Eigen::Matrix3d::Identity(),
+            _rmpcc.hessianRegularization);
+        currentProjection.lag.block<3,3>(0,0) = positionLag;
+        currentProjection.contour.setIdentity();
+        currentProjection.contour.block<3,3>(0,0) -= positionLag;
+    }
+    const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> &currentLagProjection =
+        currentProjection.lag;
+    const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> &currentContourProjection =
+        currentProjection.contour;
+    const double currentContourError =
+        (currentContourProjection * currentCostError).norm();
     const double progressRateMax = _rmpcc.progressRateMax;
     const double progressRateMin = std::min(_rmpcc.progressRateMin, progressRateMax);
-
-    MatrixXd A = MatrixXd::Zero(errorDim, variableDim);
-    VectorXd b = VectorXd::Zero(errorDim);
-    MatrixXd Q = MatrixXd::Zero(errorDim, errorDim);
-
-    std::vector<double> predictedProgress(static_cast<size_t>(N), _pathProgress);
-    double accumulatedProgress = _pathProgress;
-    for(int stage = 0; stage < N; ++stage)
-    {
-        double sdotGuess = _rmpcc.progressRateRef;
-        if(_warmStart.size() == variableDim)
-        {
-            sdotGuess = _warmStart(progressOffset + stage);
-        }
-        accumulatedProgress += dt * clamp_value(sdotGuess, progressRateMin, progressRateMax);
-        predictedProgress[static_cast<size_t>(stage)] = clamp_value(accumulatedProgress, 0.0, 1.0);
-    }
-
-    for(int stage = 0; stage < N; ++stage)
-    {
-        const int row = stage * TWIST_DIM;
-        b.segment<TWIST_DIM>(row) = e0;
-
-        const double s = predictedProgress[static_cast<size_t>(stage)];
-        const Eigen::Vector<double, TWIST_DIM> tau = _trajectory.tangent_at_progress(s, _rmpcc.tangentStep);
-        const double tauMetric = (tau.transpose() * _rmpcc.metric * tau)(0);
-        const double denom = std::max(tauMetric, _rmpcc.hessianRegularization);
-        const Eigen::Matrix<double, 1, TWIST_DIM> lagRow =
-            (tau.transpose() * _rmpcc.metric) / std::sqrt(denom);
-        const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> lagProjection =
-            tau * (tau.transpose() * _rmpcc.metric) / denom;
-        const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> contourProjection =
-            Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity() - lagProjection;
-        Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> stageWeight =
-            contourProjection.transpose() * _rmpcc.contourWeight * contourProjection
-            + _rmpcc.lagWeight * lagRow.transpose() * lagRow;
-        if(stage == N - 1)
-        {
-            stageWeight *= _rmpcc.terminalMultiplier;
-        }
-        Q.block<TWIST_DIM, TWIST_DIM>(row, row) = stageWeight;
-
-        for(int input = 0; input <= stage; ++input)
-        {
-            const double inputProgress = predictedProgress[static_cast<size_t>(input)];
-            const Eigen::Vector<double, TWIST_DIM> inputTau = _trajectory.tangent_at_progress(inputProgress, _rmpcc.tangentStep);
-            A.block<TWIST_DIM, TWIST_DIM>(row, input * TWIST_DIM) +=
-                dt * Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity();
-            A.block<TWIST_DIM, 1>(row, progressOffset + input) += -dt * inputTau;
-        }
-    }
-
-    MatrixXd H = 2.0 * A.transpose() * Q * A;
-    VectorXd f = 2.0 * A.transpose() * Q * b;
-
-    for(int stage = 0; stage < N; ++stage)
-    {
-        const int uOffset = stage * TWIST_DIM;
-        const int sOffset = progressOffset + stage;
-        const double feedforwardProgress = predictedProgress[static_cast<size_t>(stage)];
-        const Eigen::Vector<double, TWIST_DIM> tau =
-            _trajectory.tangent_at_progress(feedforwardProgress, _rmpcc.tangentStep);
-
-        H.block<TWIST_DIM, TWIST_DIM>(uOffset, uOffset) += 2.0 * _rmpcc.controlWeight;
-        H.block<TWIST_DIM, TWIST_DIM>(uOffset, uOffset) += 2.0 * _rmpcc.pathVelocityWeight;
-        H.block<TWIST_DIM, 1>(uOffset, sOffset) +=
-            -2.0 * _rmpcc.pathVelocityWeight * tau;
-        H.block<1, TWIST_DIM>(sOffset, uOffset) +=
-            -2.0 * tau.transpose() * _rmpcc.pathVelocityWeight;
-        H(sOffset, sOffset) +=
-            2.0 * (tau.transpose() * _rmpcc.pathVelocityWeight * tau)(0);
-
-        if(_rmpcc.progressRateWeight > 0.0)
-        {
-            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateWeight;
-            f(sOffset) += -2.0 * _rmpcc.progressRateWeight * _rmpcc.progressRateRef;
-        }
-        f(sOffset) += -_rmpcc.progressReward;
-
-        if(stage == 0)
-        {
-            H.block<TWIST_DIM, TWIST_DIM>(uOffset, uOffset) += 2.0 * _rmpcc.controlRateWeight;
-            f.segment<TWIST_DIM>(uOffset) += -2.0 * _rmpcc.controlRateWeight * _lastBodyTwist;
-        }
-        else
-        {
-            const int previousOffset = (stage - 1) * TWIST_DIM;
-            H.block<TWIST_DIM, TWIST_DIM>(uOffset, uOffset) += 2.0 * _rmpcc.controlRateWeight;
-            H.block<TWIST_DIM, TWIST_DIM>(previousOffset, previousOffset) += 2.0 * _rmpcc.controlRateWeight;
-            H.block<TWIST_DIM, TWIST_DIM>(uOffset, previousOffset) += -2.0 * _rmpcc.controlRateWeight;
-            H.block<TWIST_DIM, TWIST_DIM>(previousOffset, uOffset) += -2.0 * _rmpcc.controlRateWeight;
-        }
-
-        if(stage == 0)
-        {
-            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
-            f(sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight * _lastProgressRate;
-        }
-        else
-        {
-            const int previousSOffset = progressOffset + stage - 1;
-            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
-            H(previousSOffset, previousSOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
-            H(sOffset, previousSOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
-            H(previousSOffset, sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
-        }
-    }
-
-    H += _rmpcc.hessianRegularization * MatrixXd::Identity(variableDim, variableDim);
-    H = 0.5 * (H + H.transpose());
 
     VectorXd lower = VectorXd::Zero(variableDim);
     VectorXd upper = VectorXd::Zero(variableDim);
@@ -375,41 +364,309 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransform, const doub
     zineq(2 * variableDim) = remaining + _rmpcc.progressUpperSlack;
     zineq(2 * variableDim + 1) = scheduleRemaining;
 
+    const auto referenceTransform = [this](const double progress)
+    {
+        return reference_transform_in_trajectory_frame(progress);
+    };
+    const auto referenceTangent = [this](const double progress)
+    {
+        return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+    };
+    const auto propagate = [&](const RmpccStateVector &state,
+                               const RmpccInputVector &input)
+    {
+        return _rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3
+            ? rmpcc_exact_state_step(state, input, dt, referenceTransform)
+            : rmpcc_additive_state_step(state, input, dt, referenceTangent);
+    };
+    const auto linearize = [&](const RmpccStateVector &state,
+                               const RmpccInputVector &input)
+    {
+        return _rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3
+            ? rmpcc_linearize_exact_state_step(
+                  state, input, dt, _rmpcc.rtiFiniteDifferenceStep,
+                  referenceTransform)
+            : rmpcc_linearize_additive_state_step(
+                  state, input, dt, _rmpcc.rtiFiniteDifferenceStep,
+                  referenceTangent);
+    };
+
     if(_warmStart.size() != variableDim)
     {
         _warmStart = VectorXd::Zero(variableDim);
+        RmpccStateVector guessState = RmpccStateVector::Zero();
+        guessState.head<TWIST_DIM>() = e0;
+        guessState(6) = _pathProgress;
         for(int stage = 0; stage < N; ++stage)
         {
-            _warmStart.segment<TWIST_DIM>(stage * TWIST_DIM) =
-                body_twist_reference_at_progress(predictedProgress[static_cast<size_t>(stage)]);
-            _warmStart(progressOffset + stage) = _rmpcc.progressRateRef;
+            const int uOffset = stage * TWIST_DIM;
+            const int sOffset = progressOffset + stage;
+            const double rate = clamp_value(_rmpcc.progressRateRef,
+                                            lower(sOffset), upper(sOffset));
+            const Eigen::Vector<double,TWIST_DIM> tangent =
+                _trajectory.tangent_at_progress(guessState(6), _rmpcc.tangentStep);
+            Eigen::Vector<double,TWIST_DIM> bodyTwist =
+                rmpcc_transport_reference_tangent(
+                    guessState.head<TWIST_DIM>(), tangent) * rate;
+            for(int component = 0; component < TWIST_DIM; ++component)
+            {
+                bodyTwist(component) = clamp_value(bodyTwist(component),
+                                                   lower(uOffset + component),
+                                                   upper(uOffset + component));
+            }
+            _warmStart.segment<TWIST_DIM>(uOffset) = bodyTwist;
+            _warmStart(sOffset) = rate;
+
+            RmpccInputVector guessInput = RmpccInputVector::Zero();
+            guessInput.head<TWIST_DIM>() = bodyTwist;
+            guessInput(6) = rate;
+            guessState = propagate(guessState, guessInput);
         }
     }
 
-    VectorXd z0 = clipped_warm_start(_warmStart, lower, upper, dt, remaining, scheduleRemaining);
-    VectorXd zOpt;
-    bool fallbackUsed = false;
-    double qpStatus = 1.0;
-    try
+    const VectorXd zNominal =
+        clipped_warm_start(_warmStart, lower, upper, dt, remaining, scheduleRemaining);
+
+    // Exact nominal rollout followed by one stage-wise RTI/SQP linearisation.
+    MatrixXd errorSensitivity = MatrixXd::Zero(errorDim, variableDim);
+    VectorXd errorOffset = VectorXd::Zero(errorDim);
+    MatrixXd Q = MatrixXd::Zero(errorDim, errorDim);
+    Eigen::Matrix<double,7,Eigen::Dynamic> stateSensitivity(7, variableDim);
+    stateSensitivity.setZero();
+
+    std::vector<RmpccStateVector> nominalStates(static_cast<size_t>(N + 1));
+    std::vector<RmpccInputVector> nominalInputs(static_cast<size_t>(N));
+    std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> contourProjections(
+        static_cast<size_t>(N));
+    std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> lagProjections(
+        static_cast<size_t>(N));
+    std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> contourCostWeights(
+        static_cast<size_t>(N));
+    std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> lagCostWeights(
+        static_cast<size_t>(N));
+    std::vector<Eigen::Vector<double,TWIST_DIM>> transportedTangents(
+        static_cast<size_t>(N));
+    nominalStates.front().setZero();
+    nominalStates.front().head<TWIST_DIM>() = e0;
+    nominalStates.front()(6) = _pathProgress;
+
+    for(int stage = 0; stage < N; ++stage)
     {
-        zOpt = _qpSolver.solve(H, f, Bineq, zineq, z0);
-        if(zOpt.size() != variableDim or not zOpt.allFinite())
+        const int uOffset = stage * TWIST_DIM;
+        const int sOffset = progressOffset + stage;
+        RmpccInputVector &nominalInput = nominalInputs[static_cast<size_t>(stage)];
+        nominalInput.head<TWIST_DIM>() = zNominal.segment<TWIST_DIM>(uOffset);
+        nominalInput(6) = zNominal(sOffset);
+
+        const RmpccStageLinearization linearization = linearize(
+            nominalStates[static_cast<size_t>(stage)], nominalInput);
+        nominalStates[static_cast<size_t>(stage + 1)] = linearization.nominalNext;
+
+        stateSensitivity = linearization.stateJacobian * stateSensitivity;
+        for(int component = 0; component < TWIST_DIM; ++component)
         {
-            throw std::runtime_error("QP returned an invalid solution.");
+            stateSensitivity.col(uOffset + component) +=
+                linearization.inputJacobian.col(component);
+        }
+        stateSensitivity.col(sOffset) += linearization.inputJacobian.col(6);
+
+        const int row = stage * TWIST_DIM;
+        const MatrixXd stageSensitivity = stateSensitivity.topRows(TWIST_DIM);
+
+        const double predictedProgress = linearization.nominalNext(6);
+        const Eigen::Vector<double,TWIST_DIM> referenceTangent =
+            _trajectory.tangent_at_progress(predictedProgress, _rmpcc.tangentStep);
+        const Eigen::Vector<double,TWIST_DIM> errorTangent =
+            rmpcc_error_coordinate_path_tangent(
+                linearization.nominalNext.head<TWIST_DIM>(), referenceTangent);
+        // Terminal geometry remains the original full screw projection in all
+        // running-lag ablations. This isolates running geometry from terminal
+        // semantics just as the leave-one-running-term-out profiles do.
+        const RmpccLagGeometry lagGeometry = stage == N - 1
+            ? RmpccLagGeometry::FullScrew
+            : _rmpcc.runningLagGeometry;
+        RmpccErrorProjection stageProjection;
+        if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+        {
+            stageProjection = rmpcc_error_projection(
+                errorTangent, _rmpcc.metric, lagGeometry,
+                _rmpcc.hessianRegularization);
+            errorSensitivity.block(row, 0, TWIST_DIM, variableDim) = stageSensitivity;
+            errorOffset.segment<TWIST_DIM>(row) =
+                linearization.nominalNext.head<TWIST_DIM>()
+                - stageSensitivity * zNominal;
+        }
+        else
+        {
+            const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> errorMap =
+                rmpcc_decoupled_error_jacobian(
+                    linearization.nominalNext.head<TWIST_DIM>(),
+                    _rmpcc.rtiFiniteDifferenceStep);
+            const MatrixXd mappedSensitivity = errorMap * stageSensitivity;
+            errorSensitivity.block(row, 0, TWIST_DIM, variableDim) = mappedSensitivity;
+            errorOffset.segment<TWIST_DIM>(row) =
+                rmpcc_decoupled_error(linearization.nominalNext.head<TWIST_DIM>())
+                - mappedSensitivity * zNominal;
+            const Eigen::Matrix3d positionLag = rmpcc_metric_projection<3>(
+                referenceTangent.head<3>(), Eigen::Matrix3d::Identity(),
+                _rmpcc.hessianRegularization);
+            stageProjection.lag.block<3,3>(0,0) = positionLag;
+            stageProjection.contour.setIdentity();
+            stageProjection.contour.block<3,3>(0,0) -= positionLag;
+        }
+        const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> &lagProjection =
+            stageProjection.lag;
+        const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> &contourProjection =
+            stageProjection.contour;
+        Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> stageContourWeight =
+            _rmpcc.contourWeight;
+        Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> stageLagWeight =
+            _rmpcc.lagWeightMatrix;
+        if(stage == N - 1)
+        {
+            const double positionScale =
+                std::sqrt(_rmpcc.terminalPositionMultiplier);
+            const double rotationScale =
+                std::sqrt(_rmpcc.terminalRotationMultiplier);
+            Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> terminalScale =
+                Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>::Identity();
+            terminalScale.diagonal().head<3>().setConstant(positionScale);
+            terminalScale.diagonal().tail<3>().setConstant(rotationScale);
+            stageContourWeight = terminalScale * stageContourWeight * terminalScale;
+            stageLagWeight *= _rmpcc.terminalLagMultiplier;
+            stageLagWeight = rmpcc_component_scaled_weight(
+                stageLagWeight,
+                _rmpcc.terminalLagTranslationScale,
+                _rmpcc.terminalLagRotationScale);
+        }
+        else
+        {
+            // Running-cost ablations deliberately leave the terminal objective
+            // unchanged so each experiment removes exactly one running term.
+            stageContourWeight *= _rmpcc.runningContourScale;
+            stageLagWeight *= _rmpcc.runningLagScale;
+            stageLagWeight = rmpcc_component_scaled_weight(
+                stageLagWeight,
+                _rmpcc.runningLagTranslationScale,
+                _rmpcc.runningLagRotationScale);
+        }
+        Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> stageWeight;
+        if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+        {
+            stageWeight =
+                contourProjection.transpose() * stageContourWeight * contourProjection
+                + lagProjection.transpose() * stageLagWeight * lagProjection;
+        }
+        else
+        {
+            stageWeight = rmpcc_decoupled_cost_weight(
+                referenceTangent, stageContourWeight, stageLagWeight,
+                _rmpcc.hessianRegularization);
+        }
+        if(stage == N - 1)
+        {
+            // Backward-compatible global multiplier; new configurations should
+            // normally leave it at one and tune the three terminal terms above.
+            stageWeight *= _rmpcc.terminalMultiplier;
+            stageContourWeight *= _rmpcc.terminalMultiplier;
+            stageLagWeight *= _rmpcc.terminalMultiplier;
+        }
+        contourProjections[static_cast<size_t>(stage)] = contourProjection;
+        lagProjections[static_cast<size_t>(stage)] = lagProjection;
+        contourCostWeights[static_cast<size_t>(stage)] = stageContourWeight;
+        lagCostWeights[static_cast<size_t>(stage)] = stageLagWeight;
+        Q.block<TWIST_DIM,TWIST_DIM>(row, row) = stageWeight;
+    }
+
+    MatrixXd H = 2.0 * errorSensitivity.transpose() * Q * errorSensitivity;
+    VectorXd f = 2.0 * errorSensitivity.transpose() * Q * errorOffset;
+
+    for(int stage = 0; stage < N; ++stage)
+    {
+        const int uOffset = stage * TWIST_DIM;
+        const int sOffset = progressOffset + stage;
+        const RmpccStateVector &stageState = nominalStates[static_cast<size_t>(stage)];
+        const Eigen::Vector<double,TWIST_DIM> tangent =
+            _trajectory.tangent_at_progress(stageState(6), _rmpcc.tangentStep);
+        const Eigen::Vector<double,TWIST_DIM> transportedTangent =
+            rmpcc_transport_reference_tangent(
+                stageState.head<TWIST_DIM>(), tangent);
+        transportedTangents[static_cast<size_t>(stage)] = transportedTangent;
+        const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
+            _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
+
+        H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+            2.0 * (_rmpcc.controlWeight + pathVelocityWeight);
+        H.block<TWIST_DIM,1>(uOffset, sOffset) +=
+            -2.0 * pathVelocityWeight * transportedTangent;
+        H.block<1,TWIST_DIM>(sOffset, uOffset) +=
+            -2.0 * transportedTangent.transpose() * pathVelocityWeight;
+        H(sOffset, sOffset) +=
+            2.0 * (transportedTangent.transpose()
+                   * pathVelocityWeight * transportedTangent)(0);
+
+        if(_rmpcc.progressRateWeight > 0.0)
+        {
+            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateWeight;
+            f(sOffset) += -2.0 * _rmpcc.progressRateWeight * _rmpcc.progressRateRef;
+        }
+        f(sOffset) += -_rmpcc.progressReward * dt;
+
+        if(stage == 0)
+        {
+            H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                2.0 * _rmpcc.controlRateWeight;
+            f.segment<TWIST_DIM>(uOffset) +=
+                -2.0 * _rmpcc.controlRateWeight * _lastBodyTwist;
+            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
+            f(sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight * _lastProgressRate;
+        }
+        else
+        {
+            const int previousUOffset = (stage - 1) * TWIST_DIM;
+            const int previousSOffset = progressOffset + stage - 1;
+            H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                2.0 * _rmpcc.controlRateWeight;
+            H.block<TWIST_DIM,TWIST_DIM>(previousUOffset, previousUOffset) +=
+                2.0 * _rmpcc.controlRateWeight;
+            H.block<TWIST_DIM,TWIST_DIM>(uOffset, previousUOffset) +=
+                -2.0 * _rmpcc.controlRateWeight;
+            H.block<TWIST_DIM,TWIST_DIM>(previousUOffset, uOffset) +=
+                -2.0 * _rmpcc.controlRateWeight;
+            H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
+            H(previousSOffset, previousSOffset) +=
+                2.0 * _rmpcc.progressRateSmoothWeight;
+            H(sOffset, previousSOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
+            H(previousSOffset, sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
         }
     }
-    catch(const std::exception &)
+
+    H += _rmpcc.hessianRegularization * MatrixXd::Identity(variableDim, variableDim);
+    H = 0.5 * (H + H.transpose());
+
+    const auto solveStart = std::chrono::steady_clock::now();
+    VectorXd zOpt = _qpSolver.solve(H, f, Bineq, zineq, zNominal);
+    _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - solveStart).count();
+    if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
-        zOpt = z0;
-        if(remaining <= _rmpcc.completionTolerance)
-        {
-            for(int stage = 0; stage < N; ++stage)
-            {
-                zOpt.segment<TWIST_DIM>(stage * TWIST_DIM).setZero();
-            }
-        }
-        fallbackUsed = true;
-        qpStatus = 0.0;
+        throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");
+    }
+    const double constraintViolation = (Bineq * zOpt - zineq).maxCoeff();
+    if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an infeasible solution (maximum violation "
+            + std::to_string(constraintViolation) + ").");
+    }
+    const VectorXd qpGradient = H * zOpt + f;
+    _diagnostics.qpFirstTwistGradientNorm = qpGradient.head<TWIST_DIM>().norm();
+    _diagnostics.qpStepNorm = (zOpt - zNominal).norm();
+    _diagnostics.activeConstraintCount = 0.0;
+    const Eigen::VectorXd constraintSlack = zineq - Bineq * zOpt;
+    for(int i = 0; i < constraintSlack.size(); ++i)
+    {
+        _diagnostics.activeConstraintCount += constraintSlack(i) <= 1e-6 ? 1.0 : 0.0;
     }
 
     zOpt = clipped_warm_start(zOpt, lower, upper, dt, remaining, scheduleRemaining);
@@ -431,19 +688,115 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransform, const doub
     _diagnostics.bodyTwist = zOpt.head<TWIST_DIM>();
     _diagnostics.progressRate = zOpt(progressOffset);
     _diagnostics.se3ErrorNorm = se3ErrorNorm;
+    _diagnostics.translationError = e0.head<3>().norm();
     _diagnostics.rotationError = rotationError;
-    _diagnostics.qpStatus = qpStatus;
-    _diagnostics.fallbackUsed = fallbackUsed;
+    _diagnostics.qpStatus = 1.0;
     _diagnostics.referenceLinearSpeed = (currentTau * _rmpcc.progressRateRef).head<3>().norm();
     _diagnostics.referenceAngularSpeed = (currentTau * _rmpcc.progressRateRef).tail<3>().norm();
+    _diagnostics.feedforwardBodyTwist =
+        rmpcc_transport_reference_tangent(e0, currentTau)
+        * _diagnostics.progressRate;
+    _diagnostics.correctionBodyTwist =
+        _diagnostics.bodyTwist - _diagnostics.feedforwardBodyTwist;
+    _diagnostics.linearVelocityLimitActive = 0.0;
+    _diagnostics.angularVelocityLimitActive = 0.0;
+    for(int component = 0; component < 3; ++component)
+    {
+        _diagnostics.linearVelocityLimitActive = std::max(
+            _diagnostics.linearVelocityLimitActive,
+            std::abs(_diagnostics.bodyTwist(component))
+                >= _rmpcc.linearVelocityMax(component) - 1e-6 ? 1.0 : 0.0);
+        _diagnostics.angularVelocityLimitActive = std::max(
+            _diagnostics.angularVelocityLimitActive,
+            std::abs(_diagnostics.bodyTwist(component + 3))
+                >= _rmpcc.angularVelocityMax(component) - 1e-6 ? 1.0 : 0.0);
+    }
+    _diagnostics.maxAngularComponent =
+        _diagnostics.bodyTwist.tail<3>().cwiseAbs().maxCoeff();
+    const Eigen::Vector<double,TWIST_DIM> pathVelocityResidual =
+        _diagnostics.bodyTwist
+        - rmpcc_transport_reference_tangent(e0, currentTau)
+          * _diagnostics.progressRate;
+    _diagnostics.pathVelocityLinearResidual =
+        pathVelocityResidual.head<3>().norm();
+    _diagnostics.pathVelocityAngularResidual =
+        pathVelocityResidual.tail<3>().norm();
+    const Eigen::Vector<double,TWIST_DIM> currentLagError =
+        currentLagProjection * currentCostError;
     const Eigen::Matrix<double, 1, TWIST_DIM> lagRow =
-        (currentTau.transpose() * _rmpcc.metric) / std::sqrt(currentDenom);
+        (currentErrorTangent.transpose() * _rmpcc.metric) / std::sqrt(currentDenom);
     _diagnostics.lagError = (lagRow * e0)(0);
+    _diagnostics.lagErrorNorm = currentLagError.norm();
+    _diagnostics.lagTranslationErrorNorm = currentLagError.head<3>().norm();
+    _diagnostics.lagRotationErrorNorm = currentLagError.tail<3>().norm();
     _diagnostics.contourError = currentContourError;
+
+    _diagnostics.runningContourCost = 0.0;
+    _diagnostics.runningLagCost = 0.0;
+    _diagnostics.runningPathVelocityCost = 0.0;
+    _diagnostics.terminalContourCost = 0.0;
+    _diagnostics.terminalLagCost = 0.0;
+    _diagnostics.terminalLagTranslationCost = 0.0;
+    _diagnostics.terminalLagRotationCost = 0.0;
+    _diagnostics.runningLagTranslationCost = 0.0;
+    _diagnostics.runningLagRotationCost = 0.0;
+    const VectorXd predictedErrors = errorSensitivity * zOpt + errorOffset;
+    const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
+        _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
+    for(int stage = 0; stage < N; ++stage)
+    {
+        const int row = stage * TWIST_DIM;
+        const int uOffset = stage * TWIST_DIM;
+        const int sOffset = progressOffset + stage;
+        const Eigen::Vector<double,TWIST_DIM> predictedError =
+            predictedErrors.segment<TWIST_DIM>(row);
+        const Eigen::Vector<double,TWIST_DIM> contourError =
+            contourProjections[static_cast<size_t>(stage)] * predictedError;
+        const Eigen::Vector<double,TWIST_DIM> lagError =
+            lagProjections[static_cast<size_t>(stage)] * predictedError;
+        const double contourCost =
+            (contourError.transpose()
+             * contourCostWeights[static_cast<size_t>(stage)] * contourError)(0);
+        const double lagCost =
+            (lagError.transpose()
+             * lagCostWeights[static_cast<size_t>(stage)] * lagError)(0);
+        if(stage == N - 1)
+        {
+            _diagnostics.terminalContourCost = contourCost;
+            _diagnostics.terminalLagCost = lagCost;
+            _diagnostics.terminalLagTranslationCost =
+                (lagError.head<3>().transpose()
+                 * lagCostWeights[static_cast<size_t>(stage)].block<3,3>(0,0)
+                 * lagError.head<3>())(0);
+            _diagnostics.terminalLagRotationCost =
+                (lagError.tail<3>().transpose()
+                 * lagCostWeights[static_cast<size_t>(stage)].block<3,3>(3,3)
+                 * lagError.tail<3>())(0);
+        }
+        else
+        {
+            _diagnostics.runningContourCost += contourCost;
+            _diagnostics.runningLagCost += lagCost;
+            _diagnostics.runningLagTranslationCost +=
+                (lagError.head<3>().transpose()
+                 * lagCostWeights[static_cast<size_t>(stage)].block<3,3>(0,0)
+                 * lagError.head<3>())(0);
+            _diagnostics.runningLagRotationCost +=
+                (lagError.tail<3>().transpose()
+                 * lagCostWeights[static_cast<size_t>(stage)].block<3,3>(3,3)
+                 * lagError.tail<3>())(0);
+        }
+
+        const Eigen::Vector<double,TWIST_DIM> residual =
+            zOpt.segment<TWIST_DIM>(uOffset)
+            - transportedTangents[static_cast<size_t>(stage)] * zOpt(sOffset);
+        _diagnostics.runningPathVelocityCost +=
+            (residual.transpose() * pathVelocityWeight * residual)(0);
+    }
 }
 
 Eigen::VectorXd
-SerialLinkRMPCC::step(const double dt, const double estimatedProgress)
+SerialLinkRMPCC::step(const double dt)
 {
     if(not _trajectorySet)
     {
@@ -453,40 +806,88 @@ SerialLinkRMPCC::step(const double dt, const double estimatedProgress)
     {
         throw std::invalid_argument("[ERROR] [SERIAL LINK RMPCC] step(): dt must be positive.");
     }
-    if(not std::isfinite(estimatedProgress))
-    {
-        throw std::invalid_argument(
-            "[ERROR] [SERIAL LINK RMPCC] step(): estimatedProgress must be finite.");
-    }
-
-    _pathProgress = clamp_value(estimatedProgress, 0.0, 1.0);
     update();
 
     const RobotLibrary::Model::Pose currentPose = endpoint_pose();
-    const Eigen::Matrix4d currentTransform = pose_to_matrix(currentPose);
+    const Eigen::Matrix4d currentTransformInBase = pose_to_matrix(currentPose);
+    const Eigen::Matrix4d currentTransformInTrajectoryFrame =
+        se3_inverse(active_frame_transform_in_base()) * currentTransformInBase;
 
-    solve_rmpcc(currentTransform, dt);
+    solve_rmpcc(currentTransformInTrajectoryFrame, dt);
+    _diagnostics.effectiveLoopFrequency = 1.0 / dt;
 
     // The model Jacobian maps qdot to endpoint point velocity [p_dot; omega],
     // not to the screw-theory spatial twist [v; omega]. Rotate both components
     // into the base frame without the SE(3) adjoint p x omega term.
-    const Eigen::Matrix4d referenceTransform = reference_transform(_pathProgress);
-    const Eigen::Matrix3d referenceRotation = referenceTransform.block<3,3>(0,0);
+    const Eigen::Matrix3d currentRotation = currentTransformInBase.block<3,3>(0,0);
     Eigen::Vector<double, TWIST_DIM> baseTwist;
-    baseTwist.head<3>() = referenceRotation * _diagnostics.bodyTwist.head<3>();
-    baseTwist.tail<3>() = referenceRotation * _diagnostics.bodyTwist.tail<3>();
+    baseTwist.head<3>() = currentRotation * _diagnostics.bodyTwist.head<3>();
+    baseTwist.tail<3>() = currentRotation * _diagnostics.bodyTwist.tail<3>();
 
-    if(_rmpcc.poseFeedbackEnable)
+    const Eigen::VectorXd jointCommand = resolve_endpoint_twist(baseTwist);
+    _diagnostics.jointVelocityLimitActive = 0.0;
+    for(int joint = 0; joint < jointCommand.size(); ++joint)
     {
-        const RobotLibrary::Model::Pose referencePose = matrix_to_pose(referenceTransform);
-        baseTwist += _rmpcc.poseFeedbackGain * pose_feedback_error(currentPose, referencePose);
+        const RobotLibrary::Model::Limits limits =
+            compute_control_limits(static_cast<unsigned int>(joint));
+        if(jointCommand(joint) <= limits.lower + 1e-3
+           or jointCommand(joint) >= limits.upper - 1e-3)
+        {
+            _diagnostics.jointVelocityLimitActive = 1.0;
+            break;
+        }
     }
+    const Eigen::Vector<double, TWIST_DIM> realizedBaseTwist = _jacobianMatrix * jointCommand;
+    Eigen::Vector<double, TWIST_DIM> realizedBodyTwist;
+    realizedBodyTwist.head<3>() = currentRotation.transpose() * realizedBaseTwist.head<3>();
+    realizedBodyTwist.tail<3>() = currentRotation.transpose() * realizedBaseTwist.tail<3>();
+    _diagnostics.twistRealizationError =
+        (realizedBodyTwist - _diagnostics.bodyTwist).norm();
+
+    RmpccStateVector realizedState = RmpccStateVector::Zero();
+    realizedState.head<TWIST_DIM>() = _diagnostics.se3Error;
+    realizedState(6) = _pathProgress;
+    RmpccInputVector realizedInput = RmpccInputVector::Zero();
+    realizedInput.head<TWIST_DIM>() = realizedBodyTwist;
+    realizedInput(6) = _diagnostics.progressRate;
+    const auto referenceTransform = [this](const double progress)
+    {
+        return reference_transform_in_trajectory_frame(progress);
+    };
+    if(_rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3)
+    {
+        _predictedNextError =
+            rmpcc_exact_state_step(realizedState, realizedInput, dt,
+                                   referenceTransform).head<TWIST_DIM>();
+    }
+    else
+    {
+        const auto referenceTangent = [this](const double progress)
+        {
+            return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+        };
+        _predictedNextError =
+            rmpcc_additive_state_step(realizedState, realizedInput, dt,
+                                      referenceTangent).head<TWIST_DIM>();
+    }
+    _diagnostics.predictedNextErrorNorm = _predictedNextError.norm();
+    _predictionValid = true;
 
     _lastBodyTwist = _diagnostics.bodyTwist;
     _lastProgressRate = _diagnostics.progressRate;
+    _pathProgress = clamp_value(_pathProgress + dt * _diagnostics.progressRate, 0.0, 1.0);
     _diagnostics.pathProgress = _pathProgress;
 
-    return resolve_endpoint_twist(baseTwist);
+    return jointCommand;
+}
+
+Eigen::VectorXd
+SerialLinkRMPCC::step(const double dt, const double estimatedProgress)
+{
+    if(not std::isfinite(estimatedProgress))
+        throw std::invalid_argument("[ERROR] [SERIAL LINK RMPCC] step(): estimatedProgress must be finite.");
+    _pathProgress = clamp_value(estimatedProgress, 0.0, 1.0);
+    return step(dt);
 }
 
 } } // namespace

@@ -9,6 +9,7 @@
 
 #include <Control/SerialLinkMPC.h>
 #include <Math/CondensedMPC.h>
+#include <Math/DiscreteIntegratorLQR.h>
 
 #include <Eigen/Geometry>
 
@@ -48,7 +49,7 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
                               const RobotLibrary::Control::SerialLinkParameters &parameters,
                               unsigned int horizon,
                               double dt)
-     : SerialLinkVelocityBase(model, endpointName, parameters),
+     : SerialLinkTimeIndexedMPC(model, endpointName, parameters),
        _horizon(horizon),
        _dt(dt),
        _qpSolver(parameters.qpsolver)
@@ -57,6 +58,25 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
      if (_dt <= 0.0)    _dt      = 0.002;
 
      _controlFrequency = 1.0 / _dt;
+ }
+
+ void
+ SerialLinkMPC::set_feedback_bandwidth(const double positionGain,
+                                       const double orientationGain)
+ {
+     _wPosition = RobotLibrary::Math::integrator_stage_weight_for_gain(
+         positionGain, _wLinearVelocity, _dt);
+     _wOrientation = RobotLibrary::Math::integrator_stage_weight_for_gain(
+         orientationGain, _wAngularVelocity, _dt);
+     _terminalStateWeight.setZero();
+     _terminalStateWeight.diagonal().head<3>().setConstant(
+         RobotLibrary::Math::integrator_terminal_weight_for_gain(
+             positionGain, _wLinearVelocity, _dt));
+     _terminalStateWeight.diagonal().tail<3>().setConstant(
+         RobotLibrary::Math::integrator_terminal_weight_for_gain(
+             orientationGain, _wAngularVelocity, _dt));
+     _useTerminalStateWeight = true;
+     _warmStart.resize(0);
  }
  
  ///////////////////////////////////////////////////////////////
@@ -69,6 +89,14 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
      _trajectory = trajectory;
      _trajectorySet = true;
      _warmStart.resize(0);
+ }
+
+ void
+ SerialLinkMPC::set_trajectory_frame(
+     const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame)
+ {
+     RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+     _trajectoryFrame = frame;
  }
 
  void
@@ -98,6 +126,13 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
 
      RobotLibrary::Model::Pose currentPose = endpoint_pose();
 
+     // Keep public diagnostics aligned with the active reference used by this
+     // controller, rather than leaving SerialLinkBase's cached error stale.
+     const RobotLibrary::Trajectory::CartesianState currentReference =
+         RobotLibrary::Trajectory::express_state_in_base(
+             _trajectoryFrame, _trajectory.query_state(t0));
+     (void)pose_error(currentReference.pose);
+
      Eigen::Matrix<double,6,1> x0;
      x0.head<3>() = currentPose.translation();
      x0.tail<3>() = quaternion_to_rotation_vector(currentPose.quaternion());
@@ -112,8 +147,12 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
          const double stateTime = std::clamp(t0 + static_cast<double>(k + 1) * dt, startTime, endTime);
          const double controlTime = std::clamp(t0 + static_cast<double>(k) * dt, startTime, endTime);
 
-         RobotLibrary::Trajectory::CartesianState stateReference = _trajectory.query_state(stateTime);
-         RobotLibrary::Trajectory::CartesianState controlReference = _trajectory.query_state(controlTime);
+         RobotLibrary::Trajectory::CartesianState stateReference =
+             RobotLibrary::Trajectory::express_state_in_base(
+                 _trajectoryFrame, _trajectory.query_state(stateTime));
+         RobotLibrary::Trajectory::CartesianState controlReference =
+             RobotLibrary::Trajectory::express_state_in_base(
+                 _trajectoryFrame, _trajectory.query_state(controlTime));
 
          Eigen::Matrix<double,6,1> xRef;
          xRef.head<3>() = stateReference.pose.translation();
@@ -156,6 +195,7 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
  
      // 更新雅可比与末端姿态
      update();
+     (void)pose_error(desiredPose);
  
     // 1. 当前状态 x0 = [p; r]
     RobotLibrary::Model::Pose currentPose = endpoint_pose();
@@ -258,6 +298,10 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
      // 块对角 Qb, Rb
      MatrixXd Qb = RobotLibrary::Math::block_diagonal(Q, N);
      MatrixXd Rb = RobotLibrary::Math::block_diagonal(R, N);
+     if(_useTerminalStateWeight)
+     {
+         Qb.bottomRightCorner<nx,nx>() = _terminalStateWeight;
+     }
 
      // 参考堆叠：xRefStack 对应 x1..xN，uRefStack 对应 u0..u_{N-1}
      Matrix<double,nx,Dynamic> xref(nx, N);
@@ -311,20 +355,19 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
          _warmStart = urefVec;
      }
  
-     VectorXd uSeq;
-     try
+     // 使用 QPSolver 的不等式约束接口：min 0.5 U'HU + f'U, s.t. B U <= z
+     VectorXd uSeq = _qpSolver.solve(H, f, Bineq, zineq, _warmStart);
+     if(uSeq.size() != M or not uSeq.allFinite())
      {
-         // 使用 QPSolver 的不等式约束接口：min 0.5 U'HU + f'U, s.t. B U <= z
-         uSeq = _qpSolver.solve(H, f, Bineq, zineq, _warmStart);
+         throw std::runtime_error(
+             "[ERROR] [SERIAL LINK MPC] calculate_control(): QP returned an invalid solution.");
      }
-     catch (const std::exception &)
+     const double constraintViolation = (Bineq * uSeq - zineq).maxCoeff();
+     if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
      {
-         uSeq = urefVec; // 若求解失败则退回参考
-     }
- 
-     if (uSeq.size() != M)
-     {
-         uSeq = urefVec;
+         throw std::runtime_error(
+             "[ERROR] [SERIAL LINK MPC] calculate_control(): QP returned an infeasible solution (maximum violation "
+             + std::to_string(constraintViolation) + ").");
      }
  
      _warmStart = uSeq;

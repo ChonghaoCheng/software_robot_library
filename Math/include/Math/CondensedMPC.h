@@ -19,6 +19,7 @@
 #define CONDENSED_MPC_H
 
 #include <Eigen/Dense>
+#include <vector>
 
 namespace RobotLibrary { namespace Math {
 
@@ -46,6 +47,16 @@ CondensedPrediction
 condense_prediction(const Eigen::MatrixXd &A,
                     const Eigen::MatrixXd &B,
                     const unsigned int    &horizon);
+
+/**
+ * @brief Condense a time-varying linear prediction.
+ *
+ * For x_(k+1) = A[k] x_k + B[k] u_k, returns matrices satisfying
+ * X = stateTransition*x0 + inputResponse*U.
+ */
+CondensedPrediction
+condense_time_varying_prediction(const std::vector<Eigen::MatrixXd> &A,
+                                 const std::vector<Eigen::MatrixXd> &B);
 
 /**
  * @brief Replicate a square block along the diagonal `count` times.

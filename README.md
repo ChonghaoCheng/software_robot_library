@@ -123,25 +123,39 @@ sudo apt install libeigen3-dev
    git clone https://github.com/Woolfrey/software_robot_library.git
    ```
    
-3. Navigate in to the folder:
+2. Navigate in to the folder:
    ```
    cd ~/<your_working_directory>/software_robot_library
    ```
 
-5. Create a build directory and navigate in to it:
+3. Configure a user-owned build and repository-local install prefix:
    ```
-   mkdir build && cd build
-   ```
-
-7. Run the following commands in the `build` directory:
-   ```
-   cmake ..
-   ```
-   ```
-   sudo make install
+   cmake -S . -B build \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DCMAKE_INSTALL_PREFIX="$PWD/install"
    ```
 
-You should now be able to include different parts of the library in your C++ files.
+4. Build, test, and install without `sudo`:
+   ```
+   cmake --build build --parallel
+   ```
+   ```
+   ctest --test-dir build --output-on-failure
+   ```
+   ```
+   cmake --install build
+   ```
+
+The package configuration is written to
+`install/lib/cmake/RobotLibrary`. Point dependent projects to that directory,
+for example with `-DRobotLibrary_DIR="$PWD/install/lib/cmake/RobotLibrary"`.
+
+> [!WARNING]
+> Do not run `sudo make`, `sudo cmake --build`, or `sudo make install` inside
+> this repository. `make install` may rebuild stale targets before installing;
+> running it through `sudo` therefore creates root-owned object files in
+> `build/` and prevents later builds by the normal user. Use a repository-local
+> install prefix as above. Reserve `sudo` only for package-manager commands.
 
 [:top: Back to Top.](#robot-robot-library)
 
