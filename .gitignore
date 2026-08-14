@@ -1,5 +1,6 @@
 build/
 build_*/
+cmake-build-*/
 install/
 install_*/
 log/
