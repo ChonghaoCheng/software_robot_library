@@ -4,3 +4,7 @@ install/
 install_*/
 log/
 ara/
+
+# Local editor and Codex agent configuration.
+.idea/
+.codex/
