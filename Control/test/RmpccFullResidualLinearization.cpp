@@ -1,5 +1,6 @@
 #include <Control/RmpccCostGeometry.h>
 #include <Control/RmpccPrediction.h>
+#include <Control/RmpccResidualLinearization.h>
 
 #include <Eigen/Core>
 #include <iostream>
@@ -60,19 +61,36 @@ int main()
             state.head<6>(), tangent(state(6)));
     const auto frozen = RobotLibrary::Control::rmpcc_error_projection(
         g, metric, RobotLibrary::Control::RmpccLagGeometry::FullScrew, 1e-10);
-    Eigen::Matrix<double,12,7> implemented = Eigen::Matrix<double,12,7>::Zero();
-    implemented.block<6,6>(0,0) = frozen.contour;
-    implemented.block<6,6>(6,0) = frozen.lag;
+    Eigen::Matrix<double,12,7> frozenJacobian = Eigen::Matrix<double,12,7>::Zero();
+    frozenJacobian.block<6,6>(0,0) = frozen.contour;
+    frozenJacobian.block<6,6>(6,0) = frozen.lag;
 
-    const double relativeError =
-        (implemented - finiteDifference).norm()
+    const auto full =
+        RobotLibrary::Control::rmpcc_linearize_full_screw_residuals(
+            state, metric, 1e-10, h, tangent);
+    Eigen::Matrix<double,12,7> fullJacobian;
+    fullJacobian.topRows<6>() = full.contourJacobian;
+    fullJacobian.bottomRows<6>() = full.lagJacobian;
+
+    const double frozenRelativeError =
+        (frozenJacobian - finiteDifference).norm()
         / std::max(1.0, finiteDifference.norm());
-    std::cout << "full-screw residual gradient relative error: "
-              << relativeError << '\n';
-    if(relativeError > 1e-5)
+    const double fullRelativeError =
+        (fullJacobian - finiteDifference).norm()
+        / std::max(1.0, finiteDifference.norm());
+    std::cout << "frozen-projector residual gradient relative error: "
+              << frozenRelativeError << '\n'
+              << "full-residual gradient relative error: "
+              << fullRelativeError << '\n';
+    if(fullRelativeError > 1e-5)
     {
-        std::cerr << "Frozen projector omits state-dependent residual derivatives.\n";
+        std::cerr << "Complete residual Jacobian does not match finite difference.\n";
         return 1;
+    }
+    if(frozenRelativeError <= 1e-5)
+    {
+        std::cerr << "Fixture no longer exposes the frozen-projector approximation.\n";
+        return 2;
     }
     return 0;
 }

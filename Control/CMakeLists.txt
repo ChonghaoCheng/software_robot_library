@@ -46,6 +46,13 @@ if(BUILD_TESTING)
     add_test(NAME rmpcc_full_residual_linearization_test
              COMMAND rmpcc_full_residual_linearization_test)
 
+    add_executable(rmpcc_full_objective_directional_derivative_test
+                   test/RmpccFullObjectiveDirectionalDerivative.cpp)
+    target_link_libraries(rmpcc_full_objective_directional_derivative_test
+                          PRIVATE Control)
+    add_test(NAME rmpcc_full_objective_directional_derivative_test
+             COMMAND rmpcc_full_objective_directional_derivative_test)
+
     add_executable(rmpcc_schedule_limit_test test/RmpccScheduleLimit.cpp)
     target_link_libraries(rmpcc_schedule_limit_test PRIVATE Control)
     add_test(NAME rmpcc_schedule_limit_test COMMAND rmpcc_schedule_limit_test)

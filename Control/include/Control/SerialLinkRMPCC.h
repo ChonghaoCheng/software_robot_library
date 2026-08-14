@@ -36,6 +36,7 @@
 #include <Control/SerialLinkVelocityBase.h>
 #include <Control/RmpccCostGeometry.h>
 #include <Control/RmpccPrediction.h>
+#include <Control/RmpccResidualLinearization.h>
 #include <Trajectory/CartesianSpline.h>
 #include <Trajectory/CartesianTrajectoryFrame.h>
 
@@ -87,6 +88,8 @@ struct RmpccParameters
     // Riemannian tracking
     RmpccPredictorGeometry predictorGeometry = RmpccPredictorGeometry::ExactSE3;
     RmpccObjectiveGeometry objectiveGeometry = RmpccObjectiveGeometry::FullScrewSE3;
+    RmpccResidualLinearization residualLinearization =
+        RmpccResidualLinearization::FullResidualJacobian;
     double lagWeight                 = 10.0;     ///< Front-end convenience only; controller uses lagWeightMatrix
     double rotationCharacteristicLength = 0.0;  ///< Front-end convenience only; controller uses metric exactly as supplied
     double terminalPositionMultiplier = 1.0;    ///< Extra terminal contour weight for translation

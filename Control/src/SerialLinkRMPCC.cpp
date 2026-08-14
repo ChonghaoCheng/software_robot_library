@@ -124,6 +124,11 @@ SerialLinkRMPCC::objective_description() const
     stream << "; path_velocity=sum ||u-Ad(E^-1)*tau*sdot||_Rv^2"
            << "; input=sum ||u||_Ru^2; rate=sum ||Delta u||_Rdu^2"
            << "; progress_reward=-q_s*dt*sum(sdot); terminal=last-stage multipliers"
+           << "; residual_linearization="
+           << (_rmpcc.residualLinearization
+                   == RmpccResidualLinearization::FullResidualJacobian
+               ? "full_residual_jacobian"
+               : "frozen_projector")
            << "; effective_metric_diag=[" << _rmpcc.metric.diagonal().transpose() << "]"
            << "; effective_contour_weight_diag=["
            << _rmpcc.contourWeight.diagonal().transpose() << "]"
@@ -427,6 +432,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     MatrixXd errorSensitivity = MatrixXd::Zero(errorDim, variableDim);
     VectorXd errorOffset = VectorXd::Zero(errorDim);
     MatrixXd Q = MatrixXd::Zero(errorDim, errorDim);
+    MatrixXd fullResidualH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd fullResidualF = VectorXd::Zero(variableDim);
+    MatrixXd contourResidualSensitivity = MatrixXd::Zero(errorDim, variableDim);
+    VectorXd contourResidualOffset = VectorXd::Zero(errorDim);
+    MatrixXd lagResidualSensitivity = MatrixXd::Zero(errorDim, variableDim);
+    VectorXd lagResidualOffset = VectorXd::Zero(errorDim);
     Eigen::Matrix<double,7,Eigen::Dynamic> stateSensitivity(7, variableDim);
     stateSensitivity.setZero();
 
@@ -470,11 +481,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const MatrixXd stageSensitivity = stateSensitivity.topRows(TWIST_DIM);
 
         const double predictedProgress = linearization.nominalNext(6);
-        const Eigen::Vector<double,TWIST_DIM> referenceTangent =
+        const Eigen::Vector<double,TWIST_DIM> stageReferenceTangent =
             _trajectory.tangent_at_progress(predictedProgress, _rmpcc.tangentStep);
         const Eigen::Vector<double,TWIST_DIM> errorTangent =
             rmpcc_error_coordinate_path_tangent(
-                linearization.nominalNext.head<TWIST_DIM>(), referenceTangent);
+                linearization.nominalNext.head<TWIST_DIM>(), stageReferenceTangent);
         // Terminal geometry remains the original full screw projection in all
         // running-lag ablations. This isolates running geometry from terminal
         // semantics just as the leave-one-running-term-out profiles do.
@@ -504,7 +515,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 rmpcc_decoupled_error(linearization.nominalNext.head<TWIST_DIM>())
                 - mappedSensitivity * zNominal;
             const Eigen::Matrix3d positionLag = rmpcc_metric_projection<3>(
-                referenceTangent.head<3>(), Eigen::Matrix3d::Identity(),
+                stageReferenceTangent.head<3>(), Eigen::Matrix3d::Identity(),
                 _rmpcc.hessianRegularization);
             stageProjection.lag.block<3,3>(0,0) = positionLag;
             stageProjection.contour.setIdentity();
@@ -556,7 +567,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         else
         {
             stageWeight = rmpcc_decoupled_cost_weight(
-                referenceTangent, stageContourWeight, stageLagWeight,
+                stageReferenceTangent, stageContourWeight, stageLagWeight,
                 _rmpcc.hessianRegularization);
         }
         if(stage == N - 1)
@@ -571,11 +582,69 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         lagProjections[static_cast<size_t>(stage)] = lagProjection;
         contourCostWeights[static_cast<size_t>(stage)] = stageContourWeight;
         lagCostWeights[static_cast<size_t>(stage)] = stageLagWeight;
-        Q.block<TWIST_DIM,TWIST_DIM>(row, row) = stageWeight;
+        const bool useFullResidualJacobian =
+            _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
+            and lagGeometry == RmpccLagGeometry::FullScrew
+            and _rmpcc.residualLinearization
+                    == RmpccResidualLinearization::FullResidualJacobian;
+        if(useFullResidualJacobian)
+        {
+            const RmpccFullScrewResidualLinearization residualLinearization =
+                rmpcc_linearize_full_screw_residuals(
+                    linearization.nominalNext,
+                    _rmpcc.metric,
+                    _rmpcc.hessianRegularization,
+                    _rmpcc.rtiFiniteDifferenceStep,
+                    referenceTangent);
+            const MatrixXd contourJacobian =
+                residualLinearization.contourJacobian * stateSensitivity;
+            const MatrixXd lagJacobian =
+                residualLinearization.lagJacobian * stateSensitivity;
+            const Eigen::Vector<double,TWIST_DIM> contourOffset =
+                residualLinearization.residual.contour
+                - contourJacobian * zNominal;
+            const Eigen::Vector<double,TWIST_DIM> lagOffset =
+                residualLinearization.residual.lag
+                - lagJacobian * zNominal;
+
+            fullResidualH +=
+                2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourJacobian
+                + 2.0 * lagJacobian.transpose()
+                    * stageLagWeight * lagJacobian;
+            fullResidualF +=
+                2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourOffset
+                + 2.0 * lagJacobian.transpose()
+                    * stageLagWeight * lagOffset;
+            contourResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
+                contourJacobian;
+            contourResidualOffset.segment<TWIST_DIM>(row) = contourOffset;
+            lagResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
+                lagJacobian;
+            lagResidualOffset.segment<TWIST_DIM>(row) = lagOffset;
+        }
+        else
+        {
+            Q.block<TWIST_DIM,TWIST_DIM>(row, row) = stageWeight;
+            if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+            {
+                contourResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
+                    contourProjection * stageSensitivity;
+                contourResidualOffset.segment<TWIST_DIM>(row) =
+                    contourProjection * errorOffset.segment<TWIST_DIM>(row);
+                lagResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
+                    lagProjection * stageSensitivity;
+                lagResidualOffset.segment<TWIST_DIM>(row) =
+                    lagProjection * errorOffset.segment<TWIST_DIM>(row);
+            }
+        }
     }
 
-    MatrixXd H = 2.0 * errorSensitivity.transpose() * Q * errorSensitivity;
-    VectorXd f = 2.0 * errorSensitivity.transpose() * Q * errorOffset;
+    MatrixXd H = 2.0 * errorSensitivity.transpose() * Q * errorSensitivity
+                 + fullResidualH;
+    VectorXd f = 2.0 * errorSensitivity.transpose() * Q * errorOffset
+                 + fullResidualF;
 
     for(int stage = 0; stage < N; ++stage)
     {
@@ -737,6 +806,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.runningLagTranslationCost = 0.0;
     _diagnostics.runningLagRotationCost = 0.0;
     const VectorXd predictedErrors = errorSensitivity * zOpt + errorOffset;
+    const VectorXd predictedContourResiduals =
+        contourResidualSensitivity * zOpt + contourResidualOffset;
+    const VectorXd predictedLagResiduals =
+        lagResidualSensitivity * zOpt + lagResidualOffset;
     const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
         _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
     for(int stage = 0; stage < N; ++stage)
@@ -746,10 +819,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const int sOffset = progressOffset + stage;
         const Eigen::Vector<double,TWIST_DIM> predictedError =
             predictedErrors.segment<TWIST_DIM>(row);
-        const Eigen::Vector<double,TWIST_DIM> contourError =
-            contourProjections[static_cast<size_t>(stage)] * predictedError;
-        const Eigen::Vector<double,TWIST_DIM> lagError =
-            lagProjections[static_cast<size_t>(stage)] * predictedError;
+        Eigen::Vector<double,TWIST_DIM> contourError;
+        Eigen::Vector<double,TWIST_DIM> lagError;
+        if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+        {
+            contourError = predictedContourResiduals.segment<TWIST_DIM>(row);
+            lagError = predictedLagResiduals.segment<TWIST_DIM>(row);
+        }
+        else
+        {
+            contourError =
+                contourProjections[static_cast<size_t>(stage)] * predictedError;
+            lagError = lagProjections[static_cast<size_t>(stage)] * predictedError;
+        }
         const double contourCost =
             (contourError.transpose()
              * contourCostWeights[static_cast<size_t>(stage)] * contourError)(0);
