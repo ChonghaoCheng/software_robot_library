@@ -17,6 +17,12 @@ if(BUILD_TESTING)
     add_executable(cartesian_trajectory_frame_test test/CartesianTrajectoryFrame.cpp)
     target_link_libraries(cartesian_trajectory_frame_test PRIVATE Trajectory)
     add_test(NAME cartesian_trajectory_frame_test COMMAND cartesian_trajectory_frame_test)
+
+    add_executable(cartesian_spline_quaternion_hemisphere_test
+                   test/CartesianSplineQuaternionHemisphere.cpp)
+    target_link_libraries(cartesian_spline_quaternion_hemisphere_test PRIVATE Trajectory)
+    add_test(NAME cartesian_spline_quaternion_hemisphere_test
+             COMMAND cartesian_spline_quaternion_hemisphere_test)
 endif()
 
 install(TARGETS  Trajectory

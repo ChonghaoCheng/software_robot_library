@@ -39,6 +39,22 @@ if(BUILD_TESTING)
     add_executable(rmpcc_cost_geometry_test test/RmpccCostGeometry.cpp)
     target_link_libraries(rmpcc_cost_geometry_test PRIVATE Control)
     add_test(NAME rmpcc_cost_geometry_test COMMAND rmpcc_cost_geometry_test)
+
+    add_executable(rmpcc_full_residual_linearization_test
+                   test/RmpccFullResidualLinearization.cpp)
+    target_link_libraries(rmpcc_full_residual_linearization_test PRIVATE Control)
+    add_test(NAME rmpcc_full_residual_linearization_test
+             COMMAND rmpcc_full_residual_linearization_test)
+
+    add_executable(rmpcc_schedule_limit_test test/RmpccScheduleLimit.cpp)
+    target_link_libraries(rmpcc_schedule_limit_test PRIVATE Control)
+    add_test(NAME rmpcc_schedule_limit_test COMMAND rmpcc_schedule_limit_test)
+
+    add_executable(mpcc_stage_tangent_coordinates_test
+                   test/MpccStageTangentCoordinates.cpp)
+    target_link_libraries(mpcc_stage_tangent_coordinates_test PRIVATE Control)
+    add_test(NAME mpcc_stage_tangent_coordinates_test
+             COMMAND mpcc_stage_tangent_coordinates_test)
 endif()
 
 # Installation instructions
