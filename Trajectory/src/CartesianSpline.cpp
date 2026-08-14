@@ -44,7 +44,18 @@ CartesianSpline::CartesianSpline(const std::vector<RobotLibrary::Model::Pose> &p
                                     + std::to_string(times.size()) + " times.");
     }
     
-    // Convert the orientation from a quaternion to a vector
+    std::vector<Eigen::Quaterniond> orientations(poses.size());
+    orientations.front() = poses.front().quaternion().normalized();
+    for(std::size_t i = 1; i < poses.size(); ++i)
+    {
+        orientations[i] = poses[i].quaternion().normalized();
+        if(orientations[i].dot(orientations[i - 1]) < 0.0)
+        {
+            orientations[i].coeffs() *= -1.0;
+        }
+    }
+
+    // Convert the hemisphere-continuous orientation sequence to rotation vectors.
     std::vector<Eigen::VectorXd> positions(poses.size());                                           // NOTE: The SplineTrajectory class expects a Dynamic size vector
     for(int i = 0; i < positions.size(); i++)
     {   
@@ -52,10 +63,11 @@ CartesianSpline::CartesianSpline(const std::vector<RobotLibrary::Model::Pose> &p
         
         positions[i].head(3) = poses[i].translation();                                              // First part is just the translation
         
-        double angle = 2.0 * acos(std::clamp(poses[i].quaternion().normalized().w(), -1.0, 1.0));   // Get angle component
-        
+        const Eigen::Quaterniond &orientation = orientations[static_cast<std::size_t>(i)];
+        double angle = 2.0 * acos(std::clamp(orientation.w(), -1.0, 1.0));                          // Get angle component
+
         if (abs(angle) < 1e-03) positions[i].tail(3).setZero();                                     // Practically zero
-        else                    positions[i].tail(3) = angle * poses[i].quaternion().vec().normalized();
+        else                    positions[i].tail(3) = angle * orientation.vec().normalized();
     }
     
     Eigen::Vector<double,6> startCoordinateVelocity = startTwist;
