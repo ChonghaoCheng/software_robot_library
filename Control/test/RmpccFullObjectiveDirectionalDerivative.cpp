@@ -5,7 +5,9 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 
 namespace {
@@ -14,13 +16,14 @@ using State = RobotLibrary::Control::RmpccStateVector;
 
 Eigen::Vector<double,6> tangent(const double progress)
 {
+    const double s = std::clamp(progress, 0.0, 1.0);
     Eigen::Vector<double,6> value;
-    value << 0.16 + 0.09 * progress,
-             -0.07 + 0.04 * progress,
-              0.11 - 0.03 * progress,
-              0.31 + 0.13 * progress,
-             -0.23 + 0.10 * progress,
-              0.17 - 0.07 * progress;
+    value << 0.16 + 0.09 * s,
+             -0.07 + 0.04 * s,
+              0.11 - 0.03 * s,
+              0.31 + 0.13 * s,
+             -0.23 + 0.10 * s,
+              0.17 - 0.07 * s;
     return value;
 }
 
@@ -112,6 +115,60 @@ int main()
     {
         std::cerr << "Fixture does not distinguish frozen and full gradients.\n";
         return 2;
+    }
+
+    constexpr double boundaryObjectiveStep = 1e-7;
+    for(const double progress :
+        std::array<double,4>{0.0, 1.0, 1.0 - 0.5 * residualStep, 0.4})
+    {
+        State boundaryState = state;
+        boundaryState(6) = progress;
+        State feasibleDirection = direction;
+        if(progress == 0.0)
+        {
+            feasibleDirection(6) = std::abs(feasibleDirection(6));
+        }
+        else if(progress == 1.0 or progress > 1.0 - residualStep)
+        {
+            feasibleDirection(6) = -std::abs(feasibleDirection(6));
+        }
+
+        const auto boundaryLinearization =
+            RobotLibrary::Control::rmpcc_linearize_full_screw_residuals(
+                boundaryState, metric, 1e-10, residualStep, tangent);
+        const State boundaryGradient =
+            2.0 * boundaryLinearization.contourJacobian.transpose()
+                  * contourWeight * boundaryLinearization.residual.contour
+            + 2.0 * boundaryLinearization.lagJacobian.transpose()
+                  * lagWeight * boundaryLinearization.residual.lag;
+        double feasibleDerivative = 0.0;
+        if(progress == 0.0 or progress == 1.0)
+        {
+            feasibleDerivative =
+                (objective(boundaryState + boundaryObjectiveStep * feasibleDirection,
+                           metric, contourWeight, lagWeight)
+                 - objective(boundaryState, metric, contourWeight, lagWeight))
+                / boundaryObjectiveStep;
+        }
+        else
+        {
+            feasibleDerivative =
+                (objective(boundaryState + boundaryObjectiveStep * feasibleDirection,
+                           metric, contourWeight, lagWeight)
+                 - objective(boundaryState - boundaryObjectiveStep * feasibleDirection,
+                             metric, contourWeight, lagWeight))
+                / (2.0 * boundaryObjectiveStep);
+        }
+        const double boundaryError = relative_error(
+            boundaryGradient.dot(feasibleDirection), feasibleDerivative);
+        std::cout << "boundary objective derivative s=" << std::setprecision(10) << progress
+                  << " relative error: " << boundaryError << '\n';
+        if(boundaryError > 1e-5)
+        {
+            std::cerr << "Full residual objective boundary derivative mismatch at s="
+                      << progress << ": relative error=" << boundaryError << '\n';
+            return 3;
+        }
     }
     return 0;
 }

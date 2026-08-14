@@ -3,6 +3,10 @@
 #include <Control/RmpccResidualLinearization.h>
 
 #include <Eigen/Core>
+
+#include <array>
+#include <algorithm>
+#include <iomanip>
 #include <iostream>
 
 namespace {
@@ -12,13 +16,14 @@ using Residual = Eigen::Matrix<double,12,1>;
 
 Eigen::Matrix<double,6,1> tangent(const double progress)
 {
+    const double s = std::clamp(progress, 0.0, 1.0);
     Eigen::Matrix<double,6,1> value;
-    value << 0.18 + 0.07 * progress,
-             -0.05 + 0.03 * progress,
-              0.09 - 0.02 * progress,
-              0.24 + 0.11 * progress,
-             -0.19 + 0.08 * progress,
-              0.13 - 0.05 * progress;
+    value << 0.18 + 0.07 * s,
+             -0.05 + 0.03 * s,
+              0.09 - 0.02 * s,
+              0.24 + 0.11 * s,
+             -0.19 + 0.08 * s,
+              0.13 - 0.05 * s;
     return value;
 }
 
@@ -91,6 +96,47 @@ int main()
     {
         std::cerr << "Fixture no longer exposes the frozen-projector approximation.\n";
         return 2;
+    }
+
+    for(const double progress : std::array<double,4>{0.0, 1.0, 1.0 - 0.5 * h, 0.4})
+    {
+        State boundaryState = state;
+        boundaryState(6) = progress;
+        Eigen::Matrix<double,12,7> feasibleDifference;
+        for(int column = 0; column < 7; ++column)
+        {
+            State plus = boundaryState;
+            State minus = boundaryState;
+            plus(column) += h;
+            minus(column) -= h;
+            double denominator = 2.0 * h;
+            if(column == 6)
+            {
+                plus(6) = std::clamp(plus(6), 0.0, 1.0);
+                minus(6) = std::clamp(minus(6), 0.0, 1.0);
+                denominator = plus(6) - minus(6);
+            }
+            feasibleDifference.col(column) =
+                (residual(plus, metric) - residual(minus, metric)) / denominator;
+        }
+
+        const auto boundaryLinearization =
+            RobotLibrary::Control::rmpcc_linearize_full_screw_residuals(
+                boundaryState, metric, 1e-10, h, tangent);
+        Eigen::Matrix<double,12,7> boundaryJacobian;
+        boundaryJacobian.topRows<6>() = boundaryLinearization.contourJacobian;
+        boundaryJacobian.bottomRows<6>() = boundaryLinearization.lagJacobian;
+        const double boundaryError =
+            (boundaryJacobian - feasibleDifference).norm()
+            / std::max(1.0, feasibleDifference.norm());
+        std::cout << "boundary residual Jacobian s=" << std::setprecision(10) << progress
+                  << " relative error: " << boundaryError << '\n';
+        if(boundaryError > 1e-5)
+        {
+            std::cerr << "Full residual boundary Jacobian mismatch at s="
+                      << progress << ": relative error=" << boundaryError << '\n';
+            return 3;
+        }
     }
     return 0;
 }

@@ -82,16 +82,27 @@ rmpcc_linearize_full_screw_residuals(
         RmpccStateVector minus = state;
         plus(column) += finiteDifferenceStep;
         minus(column) -= finiteDifferenceStep;
+        double denominator = 2.0 * finiteDifferenceStep;
+        if(column == 6)
+        {
+            plus(6) = std::clamp(plus(6), 0.0, 1.0);
+            minus(6) = std::clamp(minus(6), 0.0, 1.0);
+            denominator = plus(6) - minus(6);
+        }
+        if(std::abs(denominator) <= 1e-15)
+        {
+            continue;
+        }
         const RmpccFullScrewResiduals plusResidual =
             rmpcc_full_screw_residuals(plus, metric, regularization, tangent);
         const RmpccFullScrewResiduals minusResidual =
             rmpcc_full_screw_residuals(minus, metric, regularization, tangent);
         result.contourJacobian.col(column) =
             (plusResidual.contour - minusResidual.contour)
-            / (2.0 * finiteDifferenceStep);
+            / denominator;
         result.lagJacobian.col(column) =
             (plusResidual.lag - minusResidual.lag)
-            / (2.0 * finiteDifferenceStep);
+            / denominator;
     }
     return result;
 }
