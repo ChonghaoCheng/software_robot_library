@@ -46,6 +46,12 @@ CartesianSpline::CartesianSpline(const std::vector<RobotLibrary::Model::Pose> &p
     
     std::vector<Eigen::Quaterniond> orientations(poses.size());
     orientations.front() = poses.front().quaternion().normalized();
+    Eigen::Index canonicalCoefficient = 0;
+    orientations.front().coeffs().cwiseAbs().maxCoeff(&canonicalCoefficient);
+    if(orientations.front().coeffs()(canonicalCoefficient) < 0.0)
+    {
+        orientations.front().coeffs() *= -1.0;
+    }
     for(std::size_t i = 1; i < poses.size(); ++i)
     {
         orientations[i] = poses[i].quaternion().normalized();
