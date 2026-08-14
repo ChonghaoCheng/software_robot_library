@@ -1,3 +1,4 @@
+#include <Control/SerialLinkMPCC.h>
 #include <Trajectory/CartesianSpline.h>
 
 #include <Eigen/Geometry>
@@ -37,8 +38,9 @@ int main()
     expectedInPredictionFrame.tail<3>() =
         stageToPrediction * stageBodyTangent.tail<3>();
 
-    // SerialLinkMPCC currently uses stageBodyTangent directly for every stage.
-    const Eigen::Vector<double,6> implemented = stageBodyTangent;
+    const Eigen::Vector<double,6> implemented =
+        RobotLibrary::Control::mpcc_express_body_tangent_in_prediction_frame(
+            stageBodyTangent, stageRotation, predictionRotation);
     const double error = (implemented - expectedInPredictionFrame).norm();
     if(error > 1e-9)
     {

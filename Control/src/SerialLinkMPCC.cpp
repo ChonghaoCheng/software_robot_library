@@ -457,10 +457,16 @@ SerialLinkMPCC::path_tangent_at_progress(
     const double progress,
     const Eigen::Matrix3d &referenceRotation)
 {
-    (void)referenceRotation;
     // A rigid left multiplication by the trajectory frame leaves the body
-    // tangent T(s)^-1 dT(s)/ds unchanged.
-    return _trajectory.tangent_at_progress(progress);
+    // tangent invariant, but every horizon stage must be expressed in the
+    // single prediction frame used by error0 and all task-space controls.
+    const Eigen::Matrix3d frameRotation =
+        _trajectoryFrame.transformInBase.block<3,3>(0,0);
+    const Eigen::Matrix3d stageRotation =
+        frameRotation
+        * _trajectory.pose_at_progress(progress).quaternion().toRotationMatrix();
+    return mpcc_express_body_tangent_in_prediction_frame(
+        _trajectory.tangent_at_progress(progress), stageRotation, referenceRotation);
 }
 
 } } // namespace

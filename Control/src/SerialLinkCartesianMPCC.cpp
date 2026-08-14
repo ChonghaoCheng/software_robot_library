@@ -65,8 +65,16 @@ SerialLinkCartesianMPCC::path_tangent_at_progress(
     const double progress,
     const Eigen::Matrix3d &referenceRotation)
 {
-    (void)referenceRotation;
-    return cartesian_path_tangent(reference_trajectory(), progress);
+    const Eigen::Matrix3d frameRotation =
+        trajectory_frame().transformInBase.block<3,3>(0,0);
+    const Eigen::Matrix3d stageRotation =
+        frameRotation
+        * reference_trajectory().pose_at_progress(progress)
+              .quaternion().toRotationMatrix();
+    return mpcc_express_body_tangent_in_prediction_frame(
+        cartesian_path_tangent(reference_trajectory(), progress),
+        stageRotation,
+        referenceRotation);
 }
 
 } } // namespace RobotLibrary::Control

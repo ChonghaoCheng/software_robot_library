@@ -5,6 +5,7 @@
 
 #include <Control/SerialLinkRMPCC.h>
 #include <Control/RmpccPrediction.h>
+#include <Control/RmpccProgressConstraints.h>
 #include <Math/MathFunctions.h>
 
 #include <Eigen/Geometry>
@@ -239,24 +240,15 @@ SerialLinkRMPCC::clipped_warm_start(const Eigen::VectorXd &seed,
     const int N = _rmpcc.horizonSteps;
     if(clipped.size() == 7 * N && N > 0)
     {
-        const double maxTotalProgress =
-            std::min(remaining + _rmpcc.progressUpperSlack, scheduleRemaining);
-        double totalProgress = 0.0;
-        for(int stage = 0; stage < N; ++stage)
-        {
-            totalProgress += dt * clipped(6 * N + stage);
-        }
-
-        if(totalProgress > maxTotalProgress)
-        {
-            const double feasibleRate =
-                std::max(0.0, maxTotalProgress) / (static_cast<double>(N) * std::max(dt, 1e-9));
-            for(int stage = 0; stage < N; ++stage)
-            {
-                clipped(6 * N + stage) =
-                    clamp_value(feasibleRate, lower(6 * N + stage), upper(6 * N + stage));
-            }
-        }
+        Eigen::VectorXd rates = clipped.segment(6 * N, N);
+        rmpcc_clip_progress_rates(
+            rates,
+            lower.segment(6 * N, N),
+            upper.segment(6 * N, N),
+            dt,
+            remaining + _rmpcc.progressUpperSlack,
+            scheduleRemaining);
+        clipped.segment(6 * N, N) = rates;
     }
 
     return clipped;
@@ -337,7 +329,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const bool relaxLowerProgress =
         remaining <= _rmpcc.completionTolerance
         or remaining < static_cast<double>(N) * dt * progressRateMin
-        or scheduleRemaining < static_cast<double>(N) * dt * progressRateMin;
+        or scheduleRemaining < dt * progressRateMin;
 
     for(int stage = 0; stage < N; ++stage)
     {
@@ -356,11 +348,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     zineq.head(variableDim) = upper;
     Bineq.block(variableDim, 0, variableDim, variableDim) = -MatrixXd::Identity(variableDim, variableDim);
     zineq.segment(variableDim, variableDim) = -lower;
-    for(int stage = 0; stage < N; ++stage)
-    {
-        Bineq(2 * variableDim, progressOffset + stage) = dt;
-        Bineq(2 * variableDim + 1, progressOffset + stage) = dt;
-    }
+    Bineq.block(2 * variableDim, progressOffset, 1, N) =
+        rmpcc_completion_progress_row(N, dt).transpose();
+    Bineq.block(2 * variableDim + 1, progressOffset, 1, N) =
+        rmpcc_schedule_progress_row(N, dt).transpose();
     zineq(2 * variableDim) = remaining + _rmpcc.progressUpperSlack;
     zineq(2 * variableDim + 1) = scheduleRemaining;
 

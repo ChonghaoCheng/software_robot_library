@@ -25,6 +25,20 @@
 
 namespace RobotLibrary { namespace Control {
 
+inline Eigen::Vector<double,6>
+mpcc_express_body_tangent_in_prediction_frame(
+    const Eigen::Vector<double,6> &bodyTangent,
+    const Eigen::Matrix3d &stageRotation,
+    const Eigen::Matrix3d &predictionRotation)
+{
+    const Eigen::Matrix3d rotation =
+        predictionRotation.transpose() * stageRotation;
+    Eigen::Vector<double,6> result;
+    result.head<3>() = rotation * bodyTangent.head<3>();
+    result.tail<3>() = rotation * bodyTangent.tail<3>();
+    return result;
+}
+
 enum class MpccAblationProfile
 {
     Baseline,
@@ -123,6 +137,9 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
 
         RobotLibrary::Trajectory::CartesianSpline &
         reference_trajectory() { return _trajectory; }
+
+        const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &
+        trajectory_frame() const { return _trajectoryFrame; }
 
     private:
         static constexpr int ERROR_DIM = 6;
