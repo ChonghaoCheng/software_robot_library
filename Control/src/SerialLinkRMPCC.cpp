@@ -336,10 +336,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
 
     VectorXd lower = VectorXd::Zero(variableDim);
     VectorXd upper = VectorXd::Zero(variableDim);
-    const bool relaxLowerProgress =
+    const bool relaxForCompletion =
         remaining <= _rmpcc.completionTolerance
-        or remaining < static_cast<double>(N) * dt * progressRateMin
-        or scheduleRemaining < dt * progressRateMin;
+        or remaining < static_cast<double>(N) * dt * progressRateMin;
+    const VectorXd progressLower = rmpcc_progress_rate_lower_bounds(
+        N, progressRateMin, relaxForCompletion, dt, scheduleRemaining);
 
     for(int stage = 0; stage < N; ++stage)
     {
@@ -348,7 +349,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         upper.segment<3>(uOffset) = _rmpcc.linearVelocityMax;
         lower.segment<3>(uOffset + 3) = -_rmpcc.angularVelocityMax;
         upper.segment<3>(uOffset + 3) = _rmpcc.angularVelocityMax;
-        lower(progressOffset + stage) = relaxLowerProgress ? 0.0 : progressRateMin;
+        lower(progressOffset + stage) = progressLower(stage);
         upper(progressOffset + stage) = progressRateMax;
     }
 

@@ -45,5 +45,36 @@ int main()
         std::cerr << "Warm-start clipping still applies scheduleRemaining to the horizon.\n";
         return 4;
     }
+
+    constexpr double progressRateMin = 0.4;
+    constexpr double shortScheduleRemaining = 0.02;
+    const Eigen::VectorXd implementedLower =
+        RobotLibrary::Control::rmpcc_progress_rate_lower_bounds(
+            horizon, progressRateMin, false, dt, shortScheduleRemaining);
+    const Eigen::Vector3d expectedLower(0.0, progressRateMin, progressRateMin);
+    if((implementedLower - expectedLower).norm() > 1e-12)
+    {
+        std::cerr << "First-step schedule relaxation changed future lower bounds: "
+                  << implementedLower.transpose() << "; expected "
+                  << expectedLower.transpose() << '\n';
+        return 5;
+    }
+
+    clipped = progressRates;
+    RobotLibrary::Control::rmpcc_clip_progress_rates(
+        clipped, implementedLower, upper, dt, remaining, shortScheduleRemaining);
+    const Eigen::Vector3d expectedClipped(0.2, 0.5, 0.5);
+    if((clipped - expectedClipped).norm() > 1e-12)
+    {
+        std::cerr << "Schedule clipping changed future progress rates: "
+                  << clipped.transpose() << "; expected "
+                  << expectedClipped.transpose() << '\n';
+        return 6;
+    }
+    if(completionRow.dot(clipped) > remaining + 1e-12)
+    {
+        std::cerr << "Schedule-local warm start violates completion constraint.\n";
+        return 7;
+    }
     return 0;
 }

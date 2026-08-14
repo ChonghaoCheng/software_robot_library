@@ -29,6 +29,23 @@ rmpcc_schedule_progress_row(const int horizon, const double dt)
     return row;
 }
 
+inline Eigen::VectorXd
+rmpcc_progress_rate_lower_bounds(const int horizon,
+                                 const double progressRateMin,
+                                 const bool relaxForCompletion,
+                                 const double dt,
+                                 const double scheduleRemaining)
+{
+    Eigen::VectorXd lower = Eigen::VectorXd::Constant(
+        horizon, relaxForCompletion ? 0.0 : progressRateMin);
+    if(not relaxForCompletion and horizon > 0
+       and scheduleRemaining < dt * progressRateMin)
+    {
+        lower(0) = 0.0;
+    }
+    return lower;
+}
+
 inline void
 rmpcc_clip_progress_rates(Eigen::VectorXd &rates,
                           const Eigen::VectorXd &lower,
