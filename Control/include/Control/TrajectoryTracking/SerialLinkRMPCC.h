@@ -88,6 +88,9 @@ struct RmpccParameters
     RmpccObjectiveGeometry objectiveGeometry = RmpccObjectiveGeometry::FullScrewSE3;
     RmpccResidualLinearization residualLinearization =
         RmpccResidualLinearization::FullResidualJacobian;
+    RmpccPhaseAssociation phaseAssociation = RmpccPhaseAssociation::MetricScrew;
+    RmpccLagPenalty lagPenalty = RmpccLagPenalty::PhaseInducedPoseVector;
+    double phaseDenominatorTolerance = 1e-12;
     double lagWeight                 = 10.0;     ///< Front-end convenience only; controller uses lagWeightMatrix
     double rotationCharacteristicLength = 0.0;  ///< Front-end convenience only; controller uses metric exactly as supplied
     double terminalPositionMultiplier = 1.0;    ///< Extra terminal contour weight for translation
@@ -164,6 +167,24 @@ struct RmpccDiagnostics
     double runningLagRotationCost = 0.0; ///< Rotational block contribution to running lag cost
     double referenceLinearSpeed  = 0.0;  ///< |tau_lin| * sdot_ref
     double referenceAngularSpeed = 0.0;  ///< |tau_ang| * sdot_ref
+    double metricPhaseCorrection = 0.0;
+    double taskPhaseCorrection = 0.0;
+    double phaseContamination = 0.0;
+    double activePhaseCorrection = 0.0;
+    double scalarLag = 0.0;
+    double phaseDenominator = 0.0;
+    bool phaseObservable = false;
+    double contourResidualNorm = 0.0;
+    double vectorLagTranslationNorm = 0.0;
+    double vectorLagRotationNorm = 0.0;
+    double commandedLinearTwistNorm = 0.0;
+    double commandedAngularTwistNorm = 0.0;
+    double realizedLinearTwistNorm = 0.0;
+    double realizedAngularTwistNorm = 0.0;
+    double linearTwistRealizationError = 0.0;
+    double angularTwistRealizationError = 0.0;
+    double externalLinearSaturationActive = 0.0;
+    double externalAngularSaturationActive = 0.0;
     double qpStatus              = 1.0;  ///< 1 for a completed step; solver failures throw
     bool   fallbackUsed          = false;///< Compatibility field; strict RMPCC never executes a fallback
 };

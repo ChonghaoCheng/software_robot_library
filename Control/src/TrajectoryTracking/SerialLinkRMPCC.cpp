@@ -6,6 +6,7 @@
 #include <Control/TrajectoryTracking/SerialLinkRMPCC.h>
 #include "detail/ProgressSchedule.h"
 #include "detail/RmpccPrediction.h"
+#include "detail/RmpccPhaseResidual.h"
 #include "detail/RmpccProgressConstraints.h"
 #include "detail/RmpccResidualLinearization.h"
 #include <Math/MathFunctions.h>
@@ -70,6 +71,31 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
         throw std::invalid_argument(
             "[ERROR] [SERIAL LINK RMPCC] rtiFiniteDifferenceStep must be positive.");
     }
+    if(not std::isfinite(_rmpcc.phaseDenominatorTolerance)
+       or _rmpcc.phaseDenominatorTolerance < 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] phaseDenominatorTolerance must be finite and non-negative.");
+    }
+    if((_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ
+        or _rmpcc.lagPenalty == RmpccLagPenalty::ScalarTaskDistance)
+       and _rmpcc.residualLinearization
+               != RmpccResidualLinearization::FullResidualJacobian)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] TaskPointXYZ and ScalarTaskDistance require FullResidualJacobian.");
+    }
+    if(_rmpcc.lagPenalty == RmpccLagPenalty::ScalarTaskDistance)
+    {
+        const Eigen::Vector3d translationWeights =
+            _rmpcc.lagWeightMatrix.diagonal().head<3>();
+        if((translationWeights.array() - translationWeights(0)).abs().maxCoeff()
+           > 1e-12 * std::max(1.0, std::abs(translationWeights(0))))
+        {
+            throw std::invalid_argument(
+                "[ERROR] [SERIAL LINK RMPCC] ScalarTaskDistance requires equal translational lag weights.");
+        }
+    }
     const auto validateCostScale = [](const double scale, const char *name)
     {
         if(not std::isfinite(scale) or scale < 0.0)
@@ -115,8 +141,13 @@ SerialLinkRMPCC::objective_description() const
            << "; objective=";
     if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
     {
-        stream << "sum ||(I-P_tau)e||_Qc^2+||P_tau*e||_Ql^2"
-               << ", P_tau=g*(g^T*M)/(g^T*M*g)";
+        stream << "phase="
+               << (_rmpcc.phaseAssociation == RmpccPhaseAssociation::MetricScrew
+                   ? "metric_screw" : "task_point_xyz")
+               << "; lag_penalty="
+               << (_rmpcc.lagPenalty == RmpccLagPenalty::PhaseInducedPoseVector
+                   ? "phase_induced_pose_vector" : "scalar_task_distance")
+               << "; contour=e-g*delta_s";
     }
     else
     {
@@ -302,6 +333,21 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         _trajectory.tangent_at_progress(_pathProgress, _rmpcc.tangentStep);
     const Eigen::Vector<double, TWIST_DIM> currentErrorTangent =
         rmpcc_error_coordinate_path_tangent(e0, currentTau);
+    RmpccStateVector currentState = RmpccStateVector::Zero();
+    currentState.head<TWIST_DIM>() = e0;
+    currentState(6) = _pathProgress;
+    const auto currentReferenceTransformFunction = [this](const double progress)
+    {
+        return reference_transform_in_trajectory_frame(progress);
+    };
+    const auto currentReferenceTangentFunction = [this](const double progress)
+    {
+        return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+    };
+    const RmpccPhaseResiduals currentPhaseResidual = rmpcc_phase_residuals(
+        currentState, _rmpcc.metric, _rmpcc.phaseAssociation,
+        _rmpcc.hessianRegularization, _rmpcc.phaseDenominatorTolerance,
+        currentReferenceTransformFunction, currentReferenceTangentFunction);
     // Preserve the legacy signed full-screw lag diagnostic even when the
     // running cost uses independent translational/rotational projectors.
     const double currentTauMetric =
@@ -326,8 +372,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         currentProjection.lag;
     const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> &currentContourProjection =
         currentProjection.contour;
-    const double currentContourError =
-        (currentContourProjection * currentCostError).norm();
+    const bool phaseFactorialFamily =
+        _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
+        && _rmpcc.runningLagGeometry == RmpccLagGeometry::FullScrew;
+    const double currentContourError = phaseFactorialFamily
+        ? currentPhaseResidual.contour.norm()
+        : (currentContourProjection * currentCostError).norm();
     const double progressRateMax = _rmpcc.progressRateMax;
     const double progressRateMin = std::min(_rmpcc.progressRateMin, progressRateMax);
 
@@ -440,6 +490,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     VectorXd contourResidualOffset = VectorXd::Zero(errorDim);
     MatrixXd lagResidualSensitivity = MatrixXd::Zero(errorDim, variableDim);
     VectorXd lagResidualOffset = VectorXd::Zero(errorDim);
+    MatrixXd scalarLagResidualSensitivity = MatrixXd::Zero(N, variableDim);
+    VectorXd scalarLagResidualOffset = VectorXd::Zero(N);
     Eigen::Matrix<double,7,Eigen::Dynamic> stateSensitivity(7, variableDim);
     stateSensitivity.setZero();
 
@@ -455,6 +507,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         static_cast<size_t>(N));
     std::vector<Eigen::Vector<double,TWIST_DIM>> transportedTangents(
         static_cast<size_t>(N));
+    std::vector<double> scalarLagCostWeights(static_cast<size_t>(N), 0.0);
+    std::vector<bool> usesScalarLag(static_cast<size_t>(N), false);
     std::vector<bool> usesCompleteResidualJacobian(static_cast<size_t>(N), false);
     nominalStates.front().setZero();
     nominalStates.front().head<TWIST_DIM>() = e0;
@@ -581,52 +635,98 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         lagProjections[static_cast<size_t>(stage)] = lagProjection;
         contourCostWeights[static_cast<size_t>(stage)] = stageContourWeight;
         lagCostWeights[static_cast<size_t>(stage)] = stageLagWeight;
+        scalarLagCostWeights[static_cast<size_t>(stage)] = stageLagWeight(0,0);
         const bool useFullResidualJacobian =
             _rmpcc.residualLinearization
                 == RmpccResidualLinearization::FullResidualJacobian;
         if(useFullResidualJacobian)
         {
-            const RmpccFullScrewResidualLinearization residualLinearization =
-                _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
-                ? rmpcc_linearize_projected_residuals(
-                      linearization.nominalNext,
-                      _rmpcc.metric,
-                      lagGeometry,
-                      _rmpcc.hessianRegularization,
-                      _rmpcc.rtiFiniteDifferenceStep,
-                      referenceTangent)
-                : rmpcc_linearize_decoupled_residuals(
-                      linearization.nominalNext,
-                      _rmpcc.hessianRegularization,
-                      _rmpcc.rtiFiniteDifferenceStep,
-                      referenceTangent);
-            const MatrixXd contourJacobian =
-                residualLinearization.contourJacobian * stateSensitivity;
-            const MatrixXd lagJacobian =
-                residualLinearization.lagJacobian * stateSensitivity;
-            const Eigen::Vector<double,TWIST_DIM> contourOffset =
-                residualLinearization.residual.contour
-                - contourJacobian * zNominal;
-            const Eigen::Vector<double,TWIST_DIM> lagOffset =
-                residualLinearization.residual.lag
-                - lagJacobian * zNominal;
-
-            fullResidualH +=
-                2.0 * contourJacobian.transpose()
+            MatrixXd contourJacobian;
+            Eigen::Vector<double,TWIST_DIM> contourOffset;
+            if(phaseFactorialFamily)
+            {
+                const RmpccPhaseResidualLinearization residualLinearization =
+                    rmpcc_linearize_phase_residuals(
+                        linearization.nominalNext, _rmpcc.metric,
+                        _rmpcc.phaseAssociation, _rmpcc.hessianRegularization,
+                        _rmpcc.phaseDenominatorTolerance,
+                        _rmpcc.rtiFiniteDifferenceStep,
+                        referenceTransform, referenceTangent);
+                contourJacobian =
+                    residualLinearization.contourJacobian * stateSensitivity;
+                contourOffset = residualLinearization.residual.contour
+                    - contourJacobian * zNominal;
+                fullResidualH += 2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourJacobian;
+                fullResidualF += 2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourOffset;
+                if(_rmpcc.lagPenalty
+                   == RmpccLagPenalty::PhaseInducedPoseVector)
+                {
+                    const MatrixXd lagJacobian =
+                        residualLinearization.vectorLagJacobian * stateSensitivity;
+                    const Eigen::Vector<double,TWIST_DIM> lagOffset =
+                        residualLinearization.residual.vectorLag
+                        - lagJacobian * zNominal;
+                    fullResidualH += 2.0 * lagJacobian.transpose()
+                        * stageLagWeight * lagJacobian;
+                    fullResidualF += 2.0 * lagJacobian.transpose()
+                        * stageLagWeight * lagOffset;
+                    lagResidualSensitivity.block(
+                        row, 0, TWIST_DIM, variableDim) = lagJacobian;
+                    lagResidualOffset.segment<TWIST_DIM>(row) = lagOffset;
+                }
+                else
+                {
+                    const Eigen::Matrix<double,1,Eigen::Dynamic> scalarJacobian =
+                        residualLinearization.scalarLagJacobian * stateSensitivity;
+                    const double scalarOffset =
+                        residualLinearization.residual.scalarLag
+                        - (scalarJacobian * zNominal)(0);
+                    const double qLag = scalarLagCostWeights[static_cast<size_t>(stage)];
+                    fullResidualH +=
+                        2.0 * qLag * scalarJacobian.transpose() * scalarJacobian;
+                    fullResidualF +=
+                        2.0 * qLag * scalarJacobian.transpose() * scalarOffset;
+                    scalarLagResidualSensitivity.row(stage) = scalarJacobian;
+                    scalarLagResidualOffset(stage) = scalarOffset;
+                    usesScalarLag[static_cast<size_t>(stage)] = true;
+                }
+            }
+            else
+            {
+                const RmpccFullScrewResidualLinearization residualLinearization =
+                    _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
+                    ? rmpcc_linearize_projected_residuals(
+                          linearization.nominalNext, _rmpcc.metric, lagGeometry,
+                          _rmpcc.hessianRegularization,
+                          _rmpcc.rtiFiniteDifferenceStep, referenceTangent)
+                    : rmpcc_linearize_decoupled_residuals(
+                          linearization.nominalNext, _rmpcc.hessianRegularization,
+                          _rmpcc.rtiFiniteDifferenceStep, referenceTangent);
+                contourJacobian =
+                    residualLinearization.contourJacobian * stateSensitivity;
+                const MatrixXd lagJacobian =
+                    residualLinearization.lagJacobian * stateSensitivity;
+                contourOffset = residualLinearization.residual.contour
+                    - contourJacobian * zNominal;
+                const Eigen::Vector<double,TWIST_DIM> lagOffset =
+                    residualLinearization.residual.lag - lagJacobian * zNominal;
+                fullResidualH += 2.0 * contourJacobian.transpose()
                     * stageContourWeight * contourJacobian
-                + 2.0 * lagJacobian.transpose()
+                    + 2.0 * lagJacobian.transpose()
                     * stageLagWeight * lagJacobian;
-            fullResidualF +=
-                2.0 * contourJacobian.transpose()
+                fullResidualF += 2.0 * contourJacobian.transpose()
                     * stageContourWeight * contourOffset
-                + 2.0 * lagJacobian.transpose()
+                    + 2.0 * lagJacobian.transpose()
                     * stageLagWeight * lagOffset;
+                lagResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
+                    lagJacobian;
+                lagResidualOffset.segment<TWIST_DIM>(row) = lagOffset;
+            }
             contourResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
                 contourJacobian;
             contourResidualOffset.segment<TWIST_DIM>(row) = contourOffset;
-            lagResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
-                lagJacobian;
-            lagResidualOffset.segment<TWIST_DIM>(row) = lagOffset;
             usesCompleteResidualJacobian[static_cast<size_t>(stage)] = true;
         }
         else
@@ -783,6 +883,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     }
     _diagnostics.maxAngularComponent =
         _diagnostics.bodyTwist.tail<3>().cwiseAbs().maxCoeff();
+    _diagnostics.commandedLinearTwistNorm =
+        _diagnostics.bodyTwist.head<3>().norm();
+    _diagnostics.commandedAngularTwistNorm =
+        _diagnostics.bodyTwist.tail<3>().norm();
     const Eigen::Vector<double,TWIST_DIM> pathVelocityResidual =
         _diagnostics.bodyTwist
         - rmpcc_transport_reference_tangent(e0, currentTau)
@@ -791,8 +895,9 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         pathVelocityResidual.head<3>().norm();
     _diagnostics.pathVelocityAngularResidual =
         pathVelocityResidual.tail<3>().norm();
-    const Eigen::Vector<double,TWIST_DIM> currentLagError =
-        currentLagProjection * currentCostError;
+    const Eigen::Vector<double,TWIST_DIM> currentLagError = phaseFactorialFamily
+        ? currentPhaseResidual.vectorLag
+        : currentLagProjection * currentCostError;
     const Eigen::Matrix<double, 1, TWIST_DIM> lagRow =
         (currentErrorTangent.transpose() * _rmpcc.metric) / std::sqrt(currentDenom);
     _diagnostics.lagError = (lagRow * e0)(0);
@@ -800,6 +905,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.lagTranslationErrorNorm = currentLagError.head<3>().norm();
     _diagnostics.lagRotationErrorNorm = currentLagError.tail<3>().norm();
     _diagnostics.contourError = currentContourError;
+    _diagnostics.metricPhaseCorrection = currentPhaseResidual.metricPhaseCorrection;
+    _diagnostics.taskPhaseCorrection = currentPhaseResidual.taskPhaseCorrection;
+    _diagnostics.phaseContamination = currentPhaseResidual.metricPhaseCorrection
+        - currentPhaseResidual.taskPhaseCorrection;
+    _diagnostics.activePhaseCorrection = currentPhaseResidual.phaseCorrection;
+    _diagnostics.scalarLag = currentPhaseResidual.scalarLag;
+    _diagnostics.phaseDenominator = currentPhaseResidual.phaseDenominator;
+    _diagnostics.phaseObservable = currentPhaseResidual.phaseObservable;
+    _diagnostics.contourResidualNorm = currentPhaseResidual.contour.norm();
+    _diagnostics.vectorLagTranslationNorm =
+        currentPhaseResidual.vectorLag.head<3>().norm();
+    _diagnostics.vectorLagRotationNorm =
+        currentPhaseResidual.vectorLag.tail<3>().norm();
 
     _diagnostics.runningContourCost = 0.0;
     _diagnostics.runningLagCost = 0.0;
@@ -815,6 +933,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         contourResidualSensitivity * zOpt + contourResidualOffset;
     const VectorXd predictedLagResiduals =
         lagResidualSensitivity * zOpt + lagResidualOffset;
+    const VectorXd predictedScalarLagResiduals =
+        scalarLagResidualSensitivity * zOpt + scalarLagResidualOffset;
     const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
         _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
     for(int stage = 0; stage < N; ++stage)
@@ -841,9 +961,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const double contourCost =
             (contourError.transpose()
              * contourCostWeights[static_cast<size_t>(stage)] * contourError)(0);
-        const double lagCost =
-            (lagError.transpose()
-             * lagCostWeights[static_cast<size_t>(stage)] * lagError)(0);
+        const double lagCost = usesScalarLag[static_cast<size_t>(stage)]
+            ? scalarLagCostWeights[static_cast<size_t>(stage)]
+                * predictedScalarLagResiduals(stage)
+                * predictedScalarLagResiduals(stage)
+            : (lagError.transpose()
+               * lagCostWeights[static_cast<size_t>(stage)] * lagError)(0);
         if(stage == N - 1)
         {
             _diagnostics.terminalContourCost = contourCost;
@@ -927,6 +1050,16 @@ SerialLinkRMPCC::step(const double dt)
     realizedBodyTwist.tail<3>() = currentRotation.transpose() * realizedBaseTwist.tail<3>();
     _diagnostics.twistRealizationError =
         (realizedBodyTwist - _diagnostics.bodyTwist).norm();
+    _diagnostics.realizedLinearTwistNorm = realizedBodyTwist.head<3>().norm();
+    _diagnostics.realizedAngularTwistNorm = realizedBodyTwist.tail<3>().norm();
+    _diagnostics.linearTwistRealizationError =
+        (realizedBodyTwist.head<3>() - _diagnostics.bodyTwist.head<3>()).norm();
+    _diagnostics.angularTwistRealizationError =
+        (realizedBodyTwist.tail<3>() - _diagnostics.bodyTwist.tail<3>()).norm();
+    _diagnostics.externalLinearSaturationActive =
+        _diagnostics.linearTwistRealizationError > 1e-6 ? 1.0 : 0.0;
+    _diagnostics.externalAngularSaturationActive =
+        _diagnostics.angularTwistRealizationError > 1e-6 ? 1.0 : 0.0;
 
     RmpccStateVector realizedState = RmpccStateVector::Zero();
     realizedState.head<TWIST_DIM>() = _diagnostics.se3Error;
