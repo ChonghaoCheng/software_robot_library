@@ -50,6 +50,15 @@ if(BUILD_TESTING)
     add_executable(n125_qp_active_set_replay
         test/TrajectoryTracking/N125QpActiveSetReplay.cpp)
     target_link_libraries(n125_qp_active_set_replay PRIVATE Control)
+
+    # Deterministic theory-to-mechanism study. Formal execution supplies an
+    # output directory; keeping it out of CTest avoids regenerating evidence
+    # during ordinary unit-test runs.
+    add_executable(n125_task_phase_validation
+        test/TrajectoryTracking/N125TaskPhaseValidation.cpp)
+    target_link_libraries(n125_task_phase_validation PRIVATE Control)
+    target_include_directories(n125_task_phase_validation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
 endif()
 
 # Installation instructions
