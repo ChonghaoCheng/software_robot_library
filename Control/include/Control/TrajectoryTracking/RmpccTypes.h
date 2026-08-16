@@ -29,6 +29,18 @@ enum class RmpccResidualLinearization
     FullResidualJacobian
 };
 
+enum class RmpccPhaseAssociation
+{
+    MetricScrew,
+    TaskPointXYZ
+};
+
+enum class RmpccLagPenalty
+{
+    PhaseInducedPoseVector,
+    ScalarTaskDistance
+};
+
 } } // namespace RobotLibrary::Control
 
 #endif
