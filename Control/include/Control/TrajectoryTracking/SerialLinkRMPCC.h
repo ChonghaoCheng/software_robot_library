@@ -143,6 +143,10 @@ struct RmpccDiagnostics
     double qpStepNorm           = 0.0;  ///< ||z_opt - z_warm||
     double qpSolveTimeSeconds   = 0.0;  ///< Wall time spent in the task-space QP solve
     double qpPrimalViolation    = 0.0;  ///< Maximum equality/inequality residual before post-solve acceptance
+    double qpEqualityRows       = 0.0;  ///< Number of explicit task-space QP equality rows
+    double qpInequalityRows     = 0.0;  ///< Number of task-space QP inequality rows
+    double qpEqualityResidual   = 0.0;  ///< Maximum absolute equality residual
+    double qpInequalityViolation = 0.0; ///< Maximum positive inequality violation
     double effectiveLoopFrequency = 0.0;///< 1/dt for this controller sample
     double predictedNextErrorNorm = 0.0;///< Norm predicted for the next SE(3) error
     double realizedOneStepErrorNorm = 0.0;///< Norm observed at the next sample

@@ -106,6 +106,8 @@ std::string json_escape(const std::string &value)
 void write_n125_qp_snapshot(
     const Eigen::MatrixXd &H,
     const Eigen::VectorXd &f,
+    const Eigen::MatrixXd &Aeq,
+    const Eigen::VectorXd &yeq,
     const Eigen::MatrixXd &Bineq,
     const Eigen::VectorXd &zineq,
     const Eigen::VectorXd &zNominal,
@@ -152,6 +154,8 @@ void write_n125_qp_snapshot(
 
     write_csv(directory / "H.csv", H);
     write_csv(directory / "f.csv", f);
+    write_csv(directory / "Aeq.csv", Aeq);
+    write_csv(directory / "yeq.csv", yeq);
     write_csv(directory / "Bineq.csv", Bineq);
     write_csv(directory / "zineq.csv", zineq);
     write_csv(directory / "zNominal.csv", zNominal);
@@ -175,7 +179,7 @@ void write_n125_qp_snapshot(
     }
     metadata << std::setprecision(17)
              << "{\n"
-             << "  \"schema\": \"n125_qp_snapshot_v1\",\n"
+             << "  \"schema\": \"n125_qp_snapshot_v2\",\n"
              << "  \"timestamp_unix_ns\": " << timestamp << ",\n"
              << "  \"control_step_index_zero_based\": " << controlStepIndex << ",\n"
              << "  \"profile\": \""
@@ -187,6 +191,8 @@ void write_n125_qp_snapshot(
              << "  \"controller_dt_s\": " << controllerDt << ",\n"
              << "  \"horizon_steps\": " << fixedProgressRates.size() << ",\n"
              << "  \"variable_dim\": " << zNominal.size() << ",\n"
+             << "  \"equality_rows\": " << Aeq.rows() << ",\n"
+             << "  \"inequality_rows\": " << Bineq.rows() << ",\n"
              << "  \"current_path_progress\": " << pathProgress << ",\n"
              << "  \"schedule_progress_limit\": " << scheduleProgressLimit << ",\n"
              << "  \"remaining_progress\": " << remainingProgress << ",\n"
@@ -977,10 +983,14 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const double constraintViolation =
         std::max(inequalityViolation, equalityViolation);
     _diagnostics.qpPrimalViolation = constraintViolation;
+    _diagnostics.qpEqualityRows = static_cast<double>(Aeq.rows());
+    _diagnostics.qpInequalityRows = static_cast<double>(Bineq.rows());
+    _diagnostics.qpEqualityResidual = equalityViolation;
+    _diagnostics.qpInequalityViolation = std::max(0.0, inequalityViolation);
     if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
     {
         write_n125_qp_snapshot(
-            H, f, Bineq, zineq, zNominal, lower, upper, fixedProgressRates,
+            H, f, Aeq, yeq, Bineq, zineq, zNominal, lower, upper, fixedProgressRates,
             e0, nominalStates, nominalInputs, zOpt, _qpSolver.results(),
             controlStepIndex, _pathProgress, _scheduleProgressLimit, remaining,
             scheduleRemaining, dt);
