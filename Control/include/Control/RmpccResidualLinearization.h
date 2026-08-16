@@ -37,6 +37,76 @@ struct RmpccFullScrewResidualLinearization
         Eigen::Matrix<double,6,7>::Zero();
 };
 
+using RmpccDecoupledResiduals = RmpccFullScrewResiduals;
+using RmpccDecoupledResidualLinearization = RmpccFullScrewResidualLinearization;
+
+template<typename ReferenceTangentFunction>
+RmpccDecoupledResiduals
+rmpcc_decoupled_residuals(
+    const RmpccStateVector &state,
+    const double regularization,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    const Eigen::Vector<double,6> error =
+        rmpcc_decoupled_error(state.head<6>());
+    const Eigen::Vector3d tangent = referenceTangent(state(6)).template head<3>();
+    const Eigen::Matrix3d lagProjection = rmpcc_metric_projection<3>(
+        tangent, Eigen::Matrix3d::Identity(), regularization);
+
+    RmpccDecoupledResiduals result;
+    result.contour.head<3>() =
+        (Eigen::Matrix3d::Identity() - lagProjection) * error.head<3>();
+    result.contour.tail<3>() = error.tail<3>();
+    result.lag.head<3>() = lagProjection * error.head<3>();
+    return result;
+}
+
+template<typename ReferenceTangentFunction>
+RmpccDecoupledResidualLinearization
+rmpcc_linearize_decoupled_residuals(
+    const RmpccStateVector &state,
+    const double regularization,
+    const double finiteDifferenceStep,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    if(not std::isfinite(finiteDifferenceStep) or finiteDifferenceStep <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [RMPCC RESIDUAL] finiteDifferenceStep must be positive.");
+    }
+
+    auto &&tangent = referenceTangent;
+    RmpccDecoupledResidualLinearization result;
+    result.residual = rmpcc_decoupled_residuals(state, regularization, tangent);
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccStateVector plus = state;
+        RmpccStateVector minus = state;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        double denominator = 2.0 * finiteDifferenceStep;
+        if(column == 6)
+        {
+            plus(6) = std::clamp(plus(6), 0.0, 1.0);
+            minus(6) = std::clamp(minus(6), 0.0, 1.0);
+            denominator = plus(6) - minus(6);
+        }
+        if(std::abs(denominator) <= 1e-15)
+        {
+            continue;
+        }
+        const RmpccDecoupledResiduals plusResidual =
+            rmpcc_decoupled_residuals(plus, regularization, tangent);
+        const RmpccDecoupledResiduals minusResidual =
+            rmpcc_decoupled_residuals(minus, regularization, tangent);
+        result.contourJacobian.col(column) =
+            (plusResidual.contour - minusResidual.contour) / denominator;
+        result.lagJacobian.col(column) =
+            (plusResidual.lag - minusResidual.lag) / denominator;
+    }
+    return result;
+}
+
 template<typename ReferenceTangentFunction>
 RmpccFullScrewResiduals
 rmpcc_full_screw_residuals(

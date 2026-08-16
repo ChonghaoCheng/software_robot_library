@@ -454,6 +454,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         static_cast<size_t>(N));
     std::vector<Eigen::Vector<double,TWIST_DIM>> transportedTangents(
         static_cast<size_t>(N));
+    std::vector<bool> usesCompleteResidualJacobian(static_cast<size_t>(N), false);
     nominalStates.front().setZero();
     nominalStates.front().head<TWIST_DIM>() = e0;
     nominalStates.front()(6) = _pathProgress;
@@ -584,19 +585,26 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         contourCostWeights[static_cast<size_t>(stage)] = stageContourWeight;
         lagCostWeights[static_cast<size_t>(stage)] = stageLagWeight;
         const bool useFullResidualJacobian =
-            _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
-            and lagGeometry == RmpccLagGeometry::FullScrew
-            and _rmpcc.residualLinearization
-                    == RmpccResidualLinearization::FullResidualJacobian;
+            _rmpcc.residualLinearization
+                == RmpccResidualLinearization::FullResidualJacobian
+            and (_rmpcc.objectiveGeometry
+                    == RmpccObjectiveGeometry::DecoupledCartesianSO3
+                 or lagGeometry == RmpccLagGeometry::FullScrew);
         if(useFullResidualJacobian)
         {
             const RmpccFullScrewResidualLinearization residualLinearization =
-                rmpcc_linearize_full_screw_residuals(
-                    linearization.nominalNext,
-                    _rmpcc.metric,
-                    _rmpcc.hessianRegularization,
-                    _rmpcc.rtiFiniteDifferenceStep,
-                    referenceTangent);
+                _rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
+                ? rmpcc_linearize_full_screw_residuals(
+                      linearization.nominalNext,
+                      _rmpcc.metric,
+                      _rmpcc.hessianRegularization,
+                      _rmpcc.rtiFiniteDifferenceStep,
+                      referenceTangent)
+                : rmpcc_linearize_decoupled_residuals(
+                      linearization.nominalNext,
+                      _rmpcc.hessianRegularization,
+                      _rmpcc.rtiFiniteDifferenceStep,
+                      referenceTangent);
             const MatrixXd contourJacobian =
                 residualLinearization.contourJacobian * stateSensitivity;
             const MatrixXd lagJacobian =
@@ -624,6 +632,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             lagResidualSensitivity.block(row, 0, TWIST_DIM, variableDim) =
                 lagJacobian;
             lagResidualOffset.segment<TWIST_DIM>(row) = lagOffset;
+            usesCompleteResidualJacobian[static_cast<size_t>(stage)] = true;
         }
         else
         {
@@ -822,7 +831,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             predictedErrors.segment<TWIST_DIM>(row);
         Eigen::Vector<double,TWIST_DIM> contourError;
         Eigen::Vector<double,TWIST_DIM> lagError;
-        if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
+        if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3
+           or usesCompleteResidualJacobian[static_cast<size_t>(stage)])
         {
             contourError = predictedContourResiduals.segment<TWIST_DIM>(row);
             lagError = predictedLagResiduals.segment<TWIST_DIM>(row);
