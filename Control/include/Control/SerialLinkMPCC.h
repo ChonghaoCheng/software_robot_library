@@ -101,6 +101,10 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         void
         set_ablation_profile(MpccAblationProfile profile);
 
+        /** Lock horizon progress rates to the supplied time-indexed schedule. */
+        void
+        set_fixed_progress_schedule(bool enabled) { _fixedProgressSchedule = enabled; }
+
         /** Set the rigid trajectory parent pose/twist in the robot base frame. */
         void
         set_trajectory_frame(
@@ -181,6 +185,7 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
 
         // Controller-owned progress; future progress is predicted inside the QP.
         double _pathProgress = 0.0;
+        bool _fixedProgressSchedule = false;
         Eigen::Vector<double,NU> _uLast = Eigen::Vector<double,NU>::Zero();
         Eigen::VectorXd _warmStart;
 

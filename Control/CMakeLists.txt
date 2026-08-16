@@ -68,6 +68,10 @@ if(BUILD_TESTING)
     target_link_libraries(mpcc_stage_tangent_coordinates_test PRIVATE Control)
     add_test(NAME mpcc_stage_tangent_coordinates_test
              COMMAND mpcc_stage_tangent_coordinates_test)
+
+    add_executable(common_progress_schedule_test test/CommonProgressSchedule.cpp)
+    target_link_libraries(common_progress_schedule_test PRIVATE Control)
+    add_test(NAME common_progress_schedule_test COMMAND common_progress_schedule_test)
 endif()
 
 # Installation instructions

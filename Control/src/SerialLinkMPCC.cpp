@@ -4,6 +4,7 @@
  */
 
 #include <Control/SerialLinkMPCC.h>
+#include <Control/ProgressSchedule.h>
 #include <Control/RmpccCostGeometry.h>
 #include <Math/CondensedMPC.h>
 #include <Math/DiscreteIntegratorLQR.h>
@@ -189,6 +190,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     const double progressMinimum =
         std::min(_vProgressMin,
                  remaining / std::max(static_cast<double>(N) * _dt, 1e-9));
+    const Eigen::VectorXd fixedProgressRates = reference_schedule_rates(
+        _pathProgress, N, _dt, 1.0 / _vProgressNominal);
 
     std::vector<Eigen::Vector<double,ERROR_DIM>> pathTangents(static_cast<size_t>(N));
     double progress = _pathProgress;
@@ -197,12 +200,14 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         pathTangents[static_cast<size_t>(stage)] =
             path_tangent_at_progress(progress, referenceRotation);
 
-        double rate = _vProgressNominal;
-        if(_warmStart.size() == controlDim)
+        double rate = fixedProgressRates(stage);
+        if(not _fixedProgressSchedule and _warmStart.size() == controlDim)
         {
             rate = _warmStart(stage * NU + 6);
         }
-        progress = std::clamp(progress + _dt * std::clamp(rate, progressMinimum, _vProgressMax),
+        progress = std::clamp(progress + _dt * (_fixedProgressSchedule
+                                  ? rate
+                                  : std::clamp(rate, progressMinimum, _vProgressMax)),
                               0.0,
                               1.0);
     }
@@ -312,9 +317,11 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     {
         const int offset = stage * NU;
         const int row = stage * ERROR_DIM;
+        const double stageSeedRate = _fixedProgressSchedule
+            ? fixedProgressRates(stage) : nominalSeedRate;
         nominalControl.segment<ERROR_DIM>(offset) =
-            pathTangents[static_cast<size_t>(stage)] * nominalSeedRate;
-        nominalControl(offset + 6) = nominalSeedRate;
+            pathTangents[static_cast<size_t>(stage)] * stageSeedRate;
+        nominalControl(offset + 6) = stageSeedRate;
         pathVelocityResponse.block<ERROR_DIM,ERROR_DIM>(row, offset).setIdentity();
         pathVelocityResponse.block<ERROR_DIM,1>(row, offset + 6) =
             -pathTangents[static_cast<size_t>(stage)];
@@ -361,8 +368,10 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         upper.segment<3>(offset).setConstant(_vMaxLinear);
         lower.segment<3>(offset + 3).setConstant(-_vMaxAngular);
         upper.segment<3>(offset + 3).setConstant(_vMaxAngular);
-        lower(offset + 6) = progressMinimum;
-        upper(offset + 6) = _vProgressMax;
+        lower(offset + 6) = _fixedProgressSchedule
+            ? fixedProgressRates(stage) : progressMinimum;
+        upper(offset + 6) = _fixedProgressSchedule
+            ? fixedProgressRates(stage) : _vProgressMax;
     }
 
     const RobotLibrary::Math::BoxConstraint box =
@@ -395,7 +404,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         {
             predictedAdvance += _dt * seed(stage * NU + 6);
         }
-        if(predictedAdvance > remaining)
+        if(not _fixedProgressSchedule and predictedAdvance > remaining)
         {
             const double feasibleRate =
                 (N > 0 and _dt > 0.0) ? remaining / (static_cast<double>(N) * _dt) : 0.0;
@@ -442,7 +451,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         firstControl(i + 3) =
             std::clamp(firstControl(i + 3), -_vMaxAngular, _vMaxAngular);
     }
-    firstControl(6) = std::clamp(firstControl(6), progressMinimum, _vProgressMax);
+    firstControl(6) = std::clamp(firstControl(6), lower(6), upper(6));
     return firstControl;
 }
 

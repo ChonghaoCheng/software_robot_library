@@ -224,6 +224,10 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         void
         set_schedule_limit(double scheduleProgressLimit);
 
+        /** Lock horizon progress rates to the supplied time-indexed schedule. */
+        void
+        set_fixed_progress_schedule(bool enabled) { _fixedProgressSchedule = enabled; }
+
         /**
          * @brief Reset progress, warm start and rate memory (call on a new goal).
          */
@@ -276,6 +280,7 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
         Eigen::Matrix4d _disturbance = Eigen::Matrix4d::Identity();
         double _scheduleProgressLimit = 1.0;
+        bool _fixedProgressSchedule = false;
 
         // Controller-owned progress; future progress is predicted inside the QP.
         double _pathProgress = 0.0;

@@ -4,6 +4,7 @@
  */
 
 #include <Control/SerialLinkRMPCC.h>
+#include <Control/ProgressSchedule.h>
 #include <Control/RmpccPrediction.h>
 #include <Control/RmpccProgressConstraints.h>
 #include <Math/MathFunctions.h>
@@ -336,6 +337,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         or remaining < static_cast<double>(N) * dt * progressRateMin;
     const VectorXd progressLower = rmpcc_progress_rate_lower_bounds(
         N, progressRateMin, relaxForCompletion, dt, scheduleRemaining);
+    const VectorXd fixedProgressRates = reference_schedule_rates(
+        _pathProgress, N, dt, 1.0 / _rmpcc.progressRateRef);
 
     for(int stage = 0; stage < N; ++stage)
     {
@@ -344,8 +347,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         upper.segment<3>(uOffset) = _rmpcc.linearVelocityMax;
         lower.segment<3>(uOffset + 3) = -_rmpcc.angularVelocityMax;
         upper.segment<3>(uOffset + 3) = _rmpcc.angularVelocityMax;
-        lower(progressOffset + stage) = progressLower(stage);
-        upper(progressOffset + stage) = progressRateMax;
+        lower(progressOffset + stage) = _fixedProgressSchedule
+            ? fixedProgressRates(stage) : progressLower(stage);
+        upper(progressOffset + stage) = _fixedProgressSchedule
+            ? fixedProgressRates(stage) : progressRateMax;
     }
 
     MatrixXd Bineq = MatrixXd::Zero(2 * variableDim + 2, variableDim);
