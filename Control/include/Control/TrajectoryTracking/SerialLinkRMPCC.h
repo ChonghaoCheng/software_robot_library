@@ -40,6 +40,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -141,6 +142,7 @@ struct RmpccDiagnostics
     double qpFirstTwistGradientNorm = 0.0;///< ||(H z + f)_u0||; zero for an interior optimum
     double qpStepNorm           = 0.0;  ///< ||z_opt - z_warm||
     double qpSolveTimeSeconds   = 0.0;  ///< Wall time spent in the task-space QP solve
+    double qpPrimalViolation    = 0.0;  ///< Maximum equality/inequality residual before post-solve acceptance
     double effectiveLoopFrequency = 0.0;///< 1/dt for this controller sample
     double predictedNextErrorNorm = 0.0;///< Norm predicted for the next SE(3) error
     double realizedOneStepErrorNorm = 0.0;///< Norm observed at the next sample
@@ -308,6 +310,7 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         Eigen::Vector<double, TWIST_DIM> _predictedNextError = Eigen::Vector<double, TWIST_DIM>::Zero();
         bool _predictionValid = false;
         Eigen::VectorXd _warmStart;
+        std::uint64_t _controlStepIndex = 0;
 
         RmpccDiagnostics _diagnostics;
 

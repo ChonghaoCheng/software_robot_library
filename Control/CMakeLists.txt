@@ -43,6 +43,13 @@ if(BUILD_TESTING)
     add_control_test(rmpcc_schedule_limit_test test/TrajectoryTracking/RmpccScheduleLimit.cpp)
     add_control_test(mpcc_stage_tangent_coordinates_test test/TrajectoryTracking/MpccStageTangentCoordinates.cpp)
     add_control_test(common_progress_schedule_test test/TrajectoryTracking/CommonProgressSchedule.cpp)
+    add_control_test(rmpcc_qp_constraints_test test/TrajectoryTracking/RmpccQpConstraints.cpp)
+
+    # Offline N125-QP diagnostic utility. It is intentionally not a CTest
+    # because it requires an explicitly supplied, non-committed snapshot.
+    add_executable(n125_qp_active_set_replay
+        test/TrajectoryTracking/N125QpActiveSetReplay.cpp)
+    target_link_libraries(n125_qp_active_set_replay PRIVATE Control)
 endif()
 
 # Installation instructions

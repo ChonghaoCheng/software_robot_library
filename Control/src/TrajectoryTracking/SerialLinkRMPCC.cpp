@@ -8,6 +8,7 @@
 #include "detail/RmpccPrediction.h"
 #include "detail/RmpccPhaseResidual.h"
 #include "detail/RmpccProgressConstraints.h"
+#include "detail/RmpccQpConstraints.h"
 #include "detail/RmpccResidualLinearization.h"
 #include <Math/MathFunctions.h>
 
@@ -16,6 +17,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -47,6 +52,151 @@ RobotLibrary::Model::Pose matrix_to_pose(const Eigen::Matrix4d &T)
     Eigen::Quaterniond q(T.block<3,3>(0,0));
     q.normalize();
     return RobotLibrary::Model::Pose(T.block<3,1>(0,3), q);
+}
+
+template<typename Derived>
+void write_csv(const std::filesystem::path &path,
+               const Eigen::MatrixBase<Derived> &value)
+{
+    std::ofstream stream(path);
+    if(not stream)
+    {
+        throw std::runtime_error("Unable to create N125-QP snapshot file: "
+                                 + path.string());
+    }
+    stream << std::setprecision(17);
+    for(Eigen::Index row = 0; row < value.rows(); ++row)
+    {
+        for(Eigen::Index column = 0; column < value.cols(); ++column)
+        {
+            if(column != 0)
+            {
+                stream << ',';
+            }
+            stream << value(row, column);
+        }
+        stream << '\n';
+    }
+}
+
+std::string environment_value(const char *name)
+{
+    const char *value = std::getenv(name);
+    return value == nullptr ? std::string() : std::string(value);
+}
+
+std::string json_escape(const std::string &value)
+{
+    std::ostringstream stream;
+    for(const char character : value)
+    {
+        switch(character)
+        {
+            case '\\': stream << "\\\\"; break;
+            case '"': stream << "\\\""; break;
+            case '\n': stream << "\\n"; break;
+            case '\r': stream << "\\r"; break;
+            case '\t': stream << "\\t"; break;
+            default: stream << character; break;
+        }
+    }
+    return stream.str();
+}
+
+void write_n125_qp_snapshot(
+    const Eigen::MatrixXd &H,
+    const Eigen::VectorXd &f,
+    const Eigen::MatrixXd &Bineq,
+    const Eigen::VectorXd &zineq,
+    const Eigen::VectorXd &zNominal,
+    const Eigen::VectorXd &lower,
+    const Eigen::VectorXd &upper,
+    const Eigen::VectorXd &fixedProgressRates,
+    const Eigen::Vector<double,6> &eta,
+    const std::vector<RmpccStateVector> &nominalStates,
+    const std::vector<RmpccInputVector> &nominalInputs,
+    const Eigen::VectorXd &zReturned,
+    const SolverResults<double> &solverResults,
+    const std::uint64_t controlStepIndex,
+    const double pathProgress,
+    const double scheduleProgressLimit,
+    const double remainingProgress,
+    const double scheduleRemaining,
+    const double controllerDt)
+{
+    const std::string requestedDirectory =
+        environment_value("RMPCC_QP_SNAPSHOT_DIR");
+    if(requestedDirectory.empty())
+    {
+        return;
+    }
+
+    const std::filesystem::path directory(requestedDirectory);
+    std::filesystem::create_directories(directory);
+    const std::filesystem::path metadataPath = directory / "metadata.json";
+    if(std::filesystem::exists(metadataPath))
+    {
+        return;
+    }
+
+    Eigen::MatrixXd states(static_cast<Eigen::Index>(nominalStates.size()), 7);
+    for(Eigen::Index row = 0; row < states.rows(); ++row)
+    {
+        states.row(row) = nominalStates[static_cast<std::size_t>(row)].transpose();
+    }
+    Eigen::MatrixXd inputs(static_cast<Eigen::Index>(nominalInputs.size()), 7);
+    for(Eigen::Index row = 0; row < inputs.rows(); ++row)
+    {
+        inputs.row(row) = nominalInputs[static_cast<std::size_t>(row)].transpose();
+    }
+
+    write_csv(directory / "H.csv", H);
+    write_csv(directory / "f.csv", f);
+    write_csv(directory / "Bineq.csv", Bineq);
+    write_csv(directory / "zineq.csv", zineq);
+    write_csv(directory / "zNominal.csv", zNominal);
+    write_csv(directory / "lower.csv", lower);
+    write_csv(directory / "upper.csv", upper);
+    write_csv(directory / "fixed_progress_rates.csv", fixedProgressRates);
+    write_csv(directory / "eta.csv", eta);
+    write_csv(directory / "nominal_states.csv", states);
+    write_csv(directory / "nominal_inputs.csv", inputs);
+    write_csv(directory / "zReturned.csv", zReturned);
+
+    const double nominalViolation = (Bineq * zNominal - zineq).maxCoeff();
+    const double returnedViolation = (Bineq * zReturned - zineq).maxCoeff();
+    const auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::ofstream metadata(metadataPath);
+    if(not metadata)
+    {
+        throw std::runtime_error("Unable to create N125-QP snapshot metadata: "
+                                 + metadataPath.string());
+    }
+    metadata << std::setprecision(17)
+             << "{\n"
+             << "  \"schema\": \"n125_qp_snapshot_v1\",\n"
+             << "  \"timestamp_unix_ns\": " << timestamp << ",\n"
+             << "  \"control_step_index_zero_based\": " << controlStepIndex << ",\n"
+             << "  \"profile\": \""
+             << json_escape(environment_value("RMPCC_QP_PROFILE")) << "\",\n"
+             << "  \"controlled_frame\": \""
+             << json_escape(environment_value("RMPCC_QP_CONTROLLED_FRAME")) << "\",\n"
+             << "  \"trajectory\": \""
+             << json_escape(environment_value("RMPCC_QP_TRAJECTORY")) << "\",\n"
+             << "  \"controller_dt_s\": " << controllerDt << ",\n"
+             << "  \"horizon_steps\": " << fixedProgressRates.size() << ",\n"
+             << "  \"variable_dim\": " << zNominal.size() << ",\n"
+             << "  \"current_path_progress\": " << pathProgress << ",\n"
+             << "  \"schedule_progress_limit\": " << scheduleProgressLimit << ",\n"
+             << "  \"remaining_progress\": " << remainingProgress << ",\n"
+             << "  \"schedule_remaining\": " << scheduleRemaining << ",\n"
+             << "  \"nominal_max_violation\": " << nominalViolation << ",\n"
+             << "  \"returned_max_violation\": " << returnedViolation << ",\n"
+             << "  \"solver_number_of_steps\": " << solverResults.numberOfSteps << ",\n"
+             << "  \"solver_final_step_size\": " << solverResults.finalStepSize << ",\n"
+             << "  \"solver_objective\": " << solverResults.objectiveFunction << "\n"
+             << "}\n";
 }
 
 } // anonymous namespace
@@ -232,6 +382,7 @@ SerialLinkRMPCC::reset()
     _predictedNextError.setZero();
     _predictionValid = false;
     _warmStart.resize(0);
+    _controlStepIndex = 0;
     _scheduleProgressLimit = 1.0;
     _diagnostics = RmpccDiagnostics();
 }
@@ -306,6 +457,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
 
     _diagnostics.qpStatus = 0.0;
     _diagnostics.fallbackUsed = false;
+    const std::uint64_t controlStepIndex = _controlStepIndex++;
 
     const int N = _rmpcc.horizonSteps;
     const int variableDim = 7 * N;
@@ -404,18 +556,13 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             ? fixedProgressRates(stage) : progressRateMax;
     }
 
-    MatrixXd Bineq = MatrixXd::Zero(2 * variableDim + 2, variableDim);
-    VectorXd zineq = VectorXd::Zero(2 * variableDim + 2);
-    Bineq.topRows(variableDim).setIdentity();
-    zineq.head(variableDim) = upper;
-    Bineq.block(variableDim, 0, variableDim, variableDim) = -MatrixXd::Identity(variableDim, variableDim);
-    zineq.segment(variableDim, variableDim) = -lower;
-    Bineq.block(2 * variableDim, progressOffset, 1, N) =
-        rmpcc_completion_progress_row(N, dt).transpose();
-    Bineq.block(2 * variableDim + 1, progressOffset, 1, N) =
-        rmpcc_schedule_progress_row(N, dt).transpose();
-    zineq(2 * variableDim) = remaining + _rmpcc.progressUpperSlack;
-    zineq(2 * variableDim + 1) = scheduleRemaining;
+    const RmpccQpConstraints qpConstraints = rmpcc_build_qp_constraints(
+        lower, upper, N, dt, remaining + _rmpcc.progressUpperSlack,
+        scheduleRemaining, _fixedProgressSchedule, fixedProgressRates);
+    const MatrixXd &Aeq = qpConstraints.Aeq;
+    const VectorXd &yeq = qpConstraints.yeq;
+    const MatrixXd &Bineq = qpConstraints.Bineq;
+    const VectorXd &zineq = qpConstraints.zineq;
 
     const auto referenceTransform = [this](const double progress)
     {
@@ -815,16 +962,28 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     H = 0.5 * (H + H.transpose());
 
     const auto solveStart = std::chrono::steady_clock::now();
-    VectorXd zOpt = _qpSolver.solve(H, f, Bineq, zineq, zNominal);
+    VectorXd zOpt = _fixedProgressSchedule
+        ? _qpSolver.solve(H, f, Aeq, yeq, Bineq, zineq, zNominal)
+        : _qpSolver.solve(H, f, Bineq, zineq, zNominal);
     _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - solveStart).count();
     if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
         throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");
     }
-    const double constraintViolation = (Bineq * zOpt - zineq).maxCoeff();
+    const double inequalityViolation = (Bineq * zOpt - zineq).maxCoeff();
+    const double equalityViolation = Aeq.rows() == 0
+        ? 0.0 : (Aeq * zOpt - yeq).cwiseAbs().maxCoeff();
+    const double constraintViolation =
+        std::max(inequalityViolation, equalityViolation);
+    _diagnostics.qpPrimalViolation = constraintViolation;
     if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
     {
+        write_n125_qp_snapshot(
+            H, f, Bineq, zineq, zNominal, lower, upper, fixedProgressRates,
+            e0, nominalStates, nominalInputs, zOpt, _qpSolver.results(),
+            controlStepIndex, _pathProgress, _scheduleProgressLimit, remaining,
+            scheduleRemaining, dt);
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an infeasible solution (maximum violation "
             + std::to_string(constraintViolation) + ").");
