@@ -65,7 +65,8 @@ Pose::error(const Pose &desired)
 Pose
 Pose::inverse()
 {
-     return Pose(-_quaternion.toRotationMatrix() * _translation, _quaternion.inverse());
+     const Eigen::Quaterniond qInv = _quaternion.inverse();
+     return Pose(-qInv.toRotationMatrix() * _translation, qInv);
 }
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////

@@ -17,6 +17,12 @@ target_include_directories(Model PUBLIC
 
 target_link_libraries(Model PUBLIC Math Eigen3::Eigen)                                             # Other libraries needed to compile this one
 
+if(BUILD_TESTING)
+    add_executable(pose_inverse_test test/PoseInverse.cpp)
+    target_link_libraries(pose_inverse_test PRIVATE Model)
+    add_test(NAME pose_inverse_test COMMAND pose_inverse_test)
+endif()
+
 # Installation instructions
 install(TARGETS  Model
         EXPORT   ModelTargets
