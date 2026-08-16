@@ -59,6 +59,20 @@ rmpcc_metric_projection(
     return tangent * (tangent.transpose() * metric) / denominator;
 }
 
+/** Cartesian position contour/lag geometry; zero tangent means no lag direction. */
+inline RmpccErrorProjection
+rmpcc_decoupled_error_projection(
+    const Eigen::Matrix<double,6,1> &referenceBodyTangent,
+    const double regularization)
+{
+    RmpccErrorProjection result;
+    result.lag.block<3,3>(0,0) = rmpcc_metric_projection<3>(
+        referenceBodyTangent.head<3>(), Eigen::Matrix3d::Identity(), regularization);
+    result.contour.setIdentity();
+    result.contour.block<3,3>(0,0) -= result.lag.block<3,3>(0,0);
+    return result;
+}
+
 /**
  * @brief Construct the lag projector used at a non-terminal RMPCC stage.
  *
@@ -147,18 +161,10 @@ rmpcc_decoupled_cost_weight(
     const Eigen::Matrix<double,6,6> &lagWeight,
     const double regularization)
 {
-    Eigen::Vector3d direction = referenceBodyTangent.head<3>();
-    const double norm = direction.norm();
-    if(norm > regularization)
-    {
-        direction /= norm;
-    }
-    else
-    {
-        direction = Eigen::Vector3d::UnitX();
-    }
-    const Eigen::Matrix3d lag = direction * direction.transpose();
-    const Eigen::Matrix3d contour = Eigen::Matrix3d::Identity() - lag;
+    const RmpccErrorProjection projection = rmpcc_decoupled_error_projection(
+        referenceBodyTangent, regularization);
+    const Eigen::Matrix3d lag = projection.lag.block<3,3>(0,0);
+    const Eigen::Matrix3d contour = projection.contour.block<3,3>(0,0);
     Eigen::Matrix<double,6,6> result = Eigen::Matrix<double,6,6>::Zero();
     result.block<3,3>(0,0) =
         contour.transpose() * contourWeight.block<3,3>(0,0) * contour

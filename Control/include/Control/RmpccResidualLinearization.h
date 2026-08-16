@@ -49,9 +49,9 @@ rmpcc_decoupled_residuals(
 {
     const Eigen::Vector<double,6> error =
         rmpcc_decoupled_error(state.head<6>());
-    const Eigen::Vector3d tangent = referenceTangent(state(6)).template head<3>();
-    const Eigen::Matrix3d lagProjection = rmpcc_metric_projection<3>(
-        tangent, Eigen::Matrix3d::Identity(), regularization);
+    const RmpccErrorProjection projection = rmpcc_decoupled_error_projection(
+        referenceTangent(state(6)), regularization);
+    const Eigen::Matrix3d lagProjection = projection.lag.block<3,3>(0,0);
 
     RmpccDecoupledResiduals result;
     result.contour.head<3>() =

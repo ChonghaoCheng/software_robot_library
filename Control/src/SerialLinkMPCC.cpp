@@ -4,6 +4,7 @@
  */
 
 #include <Control/SerialLinkMPCC.h>
+#include <Control/RmpccCostGeometry.h>
 #include <Math/CondensedMPC.h>
 #include <Math/DiscreteIntegratorLQR.h>
 #include <Math/MathFunctions.h>
@@ -218,15 +219,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
 
         const Eigen::Vector<double,ERROR_DIM> &tangent =
             pathTangents[static_cast<size_t>(stage)];
-        Eigen::Vector3d tangentDirection = tangent.head<3>();
-        if(tangentDirection.norm() > 1e-9)
-        {
-            tangentDirection.normalize();
-        }
-        else
-        {
-            tangentDirection = Eigen::Vector3d::UnitX();
-        }
+        const Eigen::Matrix3d positionLagProjection =
+            rmpcc_decoupled_error_projection(tangent, 1e-9).lag.block<3,3>(0,0);
 
         double contourWeight = _wContour;
         double lagWeight = _wLag;
@@ -250,7 +244,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         }
         const Eigen::Matrix3d positionWeight =
             contourWeight * Eigen::Matrix3d::Identity()
-            + (lagWeight - contourWeight) * tangentDirection * tangentDirection.transpose();
+            + (lagWeight - contourWeight) * positionLagProjection;
         errorWeight.block<3,3>(row, row) = positionWeight;
         errorWeight.block<3,3>(row + 3, row + 3) =
             orientationWeight * Eigen::Matrix3d::Identity();

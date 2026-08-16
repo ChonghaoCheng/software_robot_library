@@ -1,4 +1,5 @@
 #include <Control/RmpccCostGeometry.h>
+#include <Control/RmpccResidualLinearization.h>
 
 #include <Eigen/Core>
 
@@ -11,6 +12,8 @@ int main()
     using RobotLibrary::Control::rmpcc_error_projection;
     using RobotLibrary::Control::rmpcc_decoupled_cost_weight;
     using RobotLibrary::Control::rmpcc_decoupled_error;
+    using RobotLibrary::Control::rmpcc_decoupled_error_projection;
+    using RobotLibrary::Control::rmpcc_decoupled_residuals;
 
     Eigen::Matrix<double,6,1> tangent;
     tangent << 0.20, -0.08, 0.04, 0.35, 0.12, -0.18;
@@ -120,6 +123,71 @@ int main()
     {
         std::cerr << "Independent SO(3) cost contains a hidden angular phase projector.\n";
         return 10;
+    }
+
+    Eigen::Matrix<double,6,1> pureRotationTangent = Eigen::Matrix<double,6,1>::Zero();
+    pureRotationTangent.tail<3>() << 0.7, -0.4, 0.3;
+    const auto pureRotationProjection = rmpcc_decoupled_error_projection(
+        pureRotationTangent, epsilon);
+    if(pureRotationProjection.lag.norm() > 1e-14
+       or (pureRotationProjection.contour
+           - Eigen::Matrix<double,6,6>::Identity()).norm() > 1e-14)
+    {
+        std::cerr << "Pure rotation must have zero translational lag projector.\n";
+        return 11;
+    }
+    Eigen::Matrix<double,6,1> arbitraryError;
+    arbitraryError << 0.13, -0.09, 0.07, 0.5, -0.3, 0.2;
+    if((pureRotationProjection.lag * arbitraryError).norm() > 1e-14
+       or ((pureRotationProjection.contour * arbitraryError).head<3>()
+           - arbitraryError.head<3>()).norm() > 1e-14)
+    {
+        std::cerr << "Pure-rotation geometry classified Cartesian error as lag.\n";
+        return 12;
+    }
+
+    Eigen::Matrix<double,6,1> smallTangent = pureRotationTangent;
+    smallTangent.head<3>() << 0.0, 1e-8, 0.0;
+    const double smallLagNorm =
+        rmpcc_decoupled_error_projection(smallTangent, 1e-9).lag.norm();
+    smallTangent.head<3>() *= 0.5;
+    const double smallerLagNorm =
+        rmpcc_decoupled_error_projection(smallTangent, 1e-9).lag.norm();
+    if(not (smallerLagNorm < smallLagNorm and smallLagNorm < 1e-6)
+       or rmpcc_decoupled_error_projection(smallTangent, 1e-9).lag(0,0) != 0.0)
+    {
+        std::cerr << "Near-zero tangent does not approach zero lag continuously.\n";
+        return 13;
+    }
+
+    RobotLibrary::Control::RmpccStateVector pureRotationState;
+    pureRotationState << arbitraryError, 0.37;
+    const auto pureRotationResidual = rmpcc_decoupled_residuals(
+        pureRotationState, epsilon,
+        [&](const double) { return pureRotationTangent; });
+    const Eigen::Matrix<double,6,1> mappedError =
+        rmpcc_decoupled_error(pureRotationState.head<6>());
+    if((pureRotationResidual.contour
+        - pureRotationProjection.contour * mappedError).norm() > 1e-14
+       or (pureRotationResidual.lag
+           - pureRotationProjection.lag * mappedError).norm() > 1e-14)
+    {
+        std::cerr << "Optimizer residual and diagnostic projection disagree.\n";
+        return 14;
+    }
+    const auto pureRotationWeight = rmpcc_decoupled_cost_weight(
+        pureRotationTangent, weight, 2.0 * weight, epsilon);
+    const double weightedError =
+        (mappedError.transpose() * pureRotationWeight * mappedError)(0);
+    const double residualCost =
+        (pureRotationResidual.contour.transpose()
+         * weight * pureRotationResidual.contour)(0)
+        + (pureRotationResidual.lag.transpose()
+           * (2.0 * weight) * pureRotationResidual.lag)(0);
+    if(std::abs(weightedError - residualCost) > 1e-12)
+    {
+        std::cerr << "Frozen optimizer weight and residual diagnostics disagree.\n";
+        return 15;
     }
 
     return 0;

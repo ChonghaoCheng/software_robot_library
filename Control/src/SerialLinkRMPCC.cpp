@@ -317,13 +317,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     else
     {
         currentCostError = rmpcc_decoupled_error(e0);
-        const Eigen::Vector3d positionTangent = currentTau.head<3>();
-        const Eigen::Matrix3d positionLag = rmpcc_metric_projection<3>(
-            positionTangent, Eigen::Matrix3d::Identity(),
-            _rmpcc.hessianRegularization);
-        currentProjection.lag.block<3,3>(0,0) = positionLag;
-        currentProjection.contour.setIdentity();
-        currentProjection.contour.block<3,3>(0,0) -= positionLag;
+        currentProjection = rmpcc_decoupled_error_projection(
+            currentTau, _rmpcc.hessianRegularization);
     }
     const Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> &currentLagProjection =
         currentProjection.lag;
@@ -516,12 +511,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             errorOffset.segment<TWIST_DIM>(row) =
                 rmpcc_decoupled_error(linearization.nominalNext.head<TWIST_DIM>())
                 - mappedSensitivity * zNominal;
-            const Eigen::Matrix3d positionLag = rmpcc_metric_projection<3>(
-                stageReferenceTangent.head<3>(), Eigen::Matrix3d::Identity(),
-                _rmpcc.hessianRegularization);
-            stageProjection.lag.block<3,3>(0,0) = positionLag;
-            stageProjection.contour.setIdentity();
-            stageProjection.contour.block<3,3>(0,0) -= positionLag;
+            stageProjection = rmpcc_decoupled_error_projection(
+                stageReferenceTangent, _rmpcc.hessianRegularization);
         }
         const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> &lagProjection =
             stageProjection.lag;
