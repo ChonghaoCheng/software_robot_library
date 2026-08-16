@@ -4,9 +4,9 @@
 
 | 控制器 | 文件 | 一句话定位 |
 |--------|------|-----------|
-| `SerialLinkMPC`   | [`SerialLinkMPC.cpp`](../Control/src/SerialLinkMPC.cpp)   | 任务空间速度级 MPC，状态为绝对位姿，控制为末端 twist |
-| `SerialLinkMPCC`  | [`SerialLinkMPCC.cpp`](../Control/src/SerialLinkMPCC.cpp) | 局部路径对齐的轮廓控制（contouring），含进度变量 |
-| `SerialLinkRMPCC` | [`SerialLinkRMPCC.cpp`](../Control/src/SerialLinkRMPCC.cpp) | 直接在 \(SE(3)\) 上的黎曼 MPCC，控制器自身拥有参考路径与进度 |
+| `SerialLinkMPC`   | [`SerialLinkMPC.cpp`](../Control/src/TrajectoryTracking/SerialLinkMPC.cpp)   | 任务空间速度级 MPC，状态为绝对位姿，控制为末端 twist |
+| `SerialLinkMPCC`  | [`SerialLinkMPCC.cpp`](../Control/src/TrajectoryTracking/SerialLinkMPCC.cpp) | 局部路径对齐的轮廓控制（contouring），含进度变量 |
+| `SerialLinkRMPCC` | [`SerialLinkRMPCC.cpp`](../Control/src/TrajectoryTracking/SerialLinkRMPCC.cpp) | 直接在 \(SE(3)\) 上的黎曼 MPCC，控制器自身拥有参考路径与进度 |
 
 三者都遵循同一条出口链路：外层在任务空间求得最优末端 twist \(\mathbf{t}_B\in\mathbb{R}^6\)，再委托内层
 `SerialLinkKinematic::resolve_endpoint_twist()` 把 twist 映射为关节速度 \(\dot{\mathbf{q}}\)（关节限位、奇异、冗余都在内层处理）。
@@ -103,7 +103,7 @@ f = B_u^\top Q_b (A_x\mathbf{x}_0 - X_{ref}) - R_b\,U_{ref}.
 
 ### 1.3 缺陷
 
-1. **【严重】姿态误差用「绝对旋转向量直接相减」，几何不正确。** 代价中的姿态误差是 \(\mathbf{r}_{ref}-\mathbf{r}\)（两个绝对旋转向量之差，[SerialLinkMPC.cpp:136](../Control/src/SerialLinkMPC.cpp#L136) / [153](../Control/src/SerialLinkMPC.cpp#L153)），这**不是**测地姿态误差。在 \(\pm\pi\) 附近会跳变并产生巨大伪误差（例如 \(\mathbf{r}=[0,0,3]\) 与 \(\mathbf{r}_{ref}=[0,0,-3]\) 实际只差 \(\approx0.28\,\mathrm{rad}\)，相减却得 \(6.0\)）。应改为在误差坐标系中建模，姿态误差取
+1. **【严重】姿态误差用「绝对旋转向量直接相减」，几何不正确。** 代价中的姿态误差是 \(\mathbf{r}_{ref}-\mathbf{r}\)（两个绝对旋转向量之差，[SerialLinkMPC.cpp:136](../Control/src/TrajectoryTracking/SerialLinkMPC.cpp#L136) / [153](../Control/src/TrajectoryTracking/SerialLinkMPC.cpp#L153)），这**不是**测地姿态误差。在 \(\pm\pi\) 附近会跳变并产生巨大伪误差（例如 \(\mathbf{r}=[0,0,3]\) 与 \(\mathbf{r}_{ref}=[0,0,-3]\) 实际只差 \(\approx0.28\,\mathrm{rad}\)，相减却得 \(6.0\)）。应改为在误差坐标系中建模，姿态误差取
    \[
    \mathbf{e}_R=\log_{SO(3)}\!\big(R_{ref}R^\top\big),
    \]
@@ -111,7 +111,7 @@ f = B_u^\top Q_b (A_x\mathbf{x}_0 - X_{ref}) - R_b\,U_{ref}.
 
 2. **【中】角速度语义不一致。** 模型把 \(\mathbf{u}\) 的角分量当作 \(\dot{\mathbf{r}}\)（与轨迹 `twist` 的角分量一致，自洽），但最终 \(\mathbf{u}_0\) 又被当作真实角速度 \(\boldsymbol{\omega}\) 送入 `resolve_endpoint_twist`。小误差下 \(\dot{\mathbf{r}}\approx\boldsymbol{\omega}\) 成立，大姿态偏差时不一致。位置项 \(\dot{\mathbf{p}}=\mathbf{v}\) 精确，无此问题。
 
-3. **【小】预测矩阵冗余。** [solveMPC](../Control/src/SerialLinkMPC.cpp#L324-L345) 完整展开 \(A^{k}\)、\(\Phi\)，但 \(A=I\) 时全部折叠为 \(\Delta t\,I\)，是无谓计算。
+3. **【小】预测矩阵冗余。** [solveMPC](../Control/src/TrajectoryTracking/SerialLinkMPC.cpp#L324-L345) 完整展开 \(A^{k}\)、\(\Phi\)，但 \(A=I\) 时全部折叠为 \(\Delta t\,I\)，是无谓计算。
 
 ---
 

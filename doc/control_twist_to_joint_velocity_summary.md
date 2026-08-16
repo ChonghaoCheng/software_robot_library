@@ -175,10 +175,10 @@ B\dot{\mathbf{q}}\le \mathbf{z}
 
 ## 5. 对应源码位置
 
-- MPCC 输出 twist 并映射回基坐标系：`Control/src/SerialLinkMPCC.cpp`
-- twist 入口与求解：`Control/src/SerialLinkKinematic.cpp`
-- 关节限幅与可操作度约束：`Control/src/SerialLinkKinematic.cpp`
-- 控制基类接口与雅可比访问：`Control/include/Control/SerialLinkBase.h`
+- MPCC 输出 twist 并映射回基坐标系：`Control/src/TrajectoryTracking/SerialLinkMPCC.cpp`
+- twist 入口与求解：`Control/src/TrajectoryTracking/SerialLinkKinematic.cpp`
+- 关节限幅与可操作度约束：`Control/src/Core/SerialLinkVelocityBase.cpp`
+- 控制基类接口与雅可比访问：`Control/include/Control/Core/SerialLinkBase.h`
 
 ---
 

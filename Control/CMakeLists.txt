@@ -1,18 +1,18 @@
 
-# List the source files for this library
-add_library(Control src/AdmittanceContactController.cpp
-                    src/ContactControllerBase.cpp
-                    src/SerialLinkBase.cpp
-                    src/SerialLinkGeometricImpedance.cpp
-                    src/SerialLinkImpedance.cpp
-                    src/SerialLinkKinematic.cpp
-                    src/SerialLinkVelocityBase.cpp
-                    src/SerialLinkMPCC.cpp
-                    src/SerialLinkCartesianMPCC.cpp
-                    src/SerialLinkMPC.cpp
-                    src/SerialLinkLieAlgebraMPC.cpp
-                    src/SerialLinkMovingFrameMPC.cpp
-                    src/SerialLinkRMPCC.cpp
+# Keep one binary target while organizing its implementation by controller purpose.
+add_library(Control src/Core/SerialLinkBase.cpp
+                    src/Core/SerialLinkVelocityBase.cpp
+                    src/TrajectoryTracking/SerialLinkKinematic.cpp
+                    src/TrajectoryTracking/SerialLinkMPCC.cpp
+                    src/TrajectoryTracking/SerialLinkCartesianMPCC.cpp
+                    src/TrajectoryTracking/SerialLinkMPC.cpp
+                    src/TrajectoryTracking/SerialLinkLieAlgebraMPC.cpp
+                    src/TrajectoryTracking/SerialLinkRMPCC.cpp
+                    src/Contact/AdmittanceContactController.cpp
+                    src/Contact/ContactControllerBase.cpp
+                    src/Contact/SerialLinkGeometricImpedance.cpp
+                    src/Contact/SerialLinkImpedance.cpp
+                    src/Contact/SerialLinkMovingFrameMPC.cpp
 )
 
 # Specify targets to be built
@@ -24,54 +24,24 @@ target_include_directories(Control PUBLIC
 target_link_libraries(Control PUBLIC Math Model Trajectory Eigen3::Eigen)                           # Other libraries needed to compile this one
 
 if(BUILD_TESTING)
-    add_executable(rmpcc_prediction_test test/RmpccPrediction.cpp)
-    target_link_libraries(rmpcc_prediction_test PRIVATE Control)
-    add_test(NAME rmpcc_prediction_test COMMAND rmpcc_prediction_test)
+    function(add_control_test target source)
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE Control)
+        target_include_directories(${target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
+        add_test(NAME ${target} COMMAND ${target})
+    endfunction()
 
-    add_executable(lie_algebra_mpc_prediction_test test/LieAlgebraMPCPrediction.cpp)
-    target_link_libraries(lie_algebra_mpc_prediction_test PRIVATE Control)
-    add_test(NAME lie_algebra_mpc_prediction_test COMMAND lie_algebra_mpc_prediction_test)
-
-    add_executable(cartesian_mpcc_prediction_test test/CartesianMPCCPrediction.cpp)
-    target_link_libraries(cartesian_mpcc_prediction_test PRIVATE Control)
-    add_test(NAME cartesian_mpcc_prediction_test COMMAND cartesian_mpcc_prediction_test)
-
-    add_executable(rmpcc_cost_geometry_test test/RmpccCostGeometry.cpp)
-    target_link_libraries(rmpcc_cost_geometry_test PRIVATE Control)
-    add_test(NAME rmpcc_cost_geometry_test COMMAND rmpcc_cost_geometry_test)
-
-    add_executable(rmpcc_full_residual_linearization_test
-                   test/RmpccFullResidualLinearization.cpp)
-    target_link_libraries(rmpcc_full_residual_linearization_test PRIVATE Control)
-    add_test(NAME rmpcc_full_residual_linearization_test
-             COMMAND rmpcc_full_residual_linearization_test)
-
-    add_executable(rmpcc_full_objective_directional_derivative_test
-                   test/RmpccFullObjectiveDirectionalDerivative.cpp)
-    target_link_libraries(rmpcc_full_objective_directional_derivative_test
-                          PRIVATE Control)
-    add_test(NAME rmpcc_full_objective_directional_derivative_test
-             COMMAND rmpcc_full_objective_directional_derivative_test)
-
-    add_executable(rmpcc_decoupled_residual_linearization_test
-                   test/RmpccDecoupledResidualLinearization.cpp)
-    target_link_libraries(rmpcc_decoupled_residual_linearization_test PRIVATE Control)
-    add_test(NAME rmpcc_decoupled_residual_linearization_test
-             COMMAND rmpcc_decoupled_residual_linearization_test)
-
-    add_executable(rmpcc_schedule_limit_test test/RmpccScheduleLimit.cpp)
-    target_link_libraries(rmpcc_schedule_limit_test PRIVATE Control)
-    add_test(NAME rmpcc_schedule_limit_test COMMAND rmpcc_schedule_limit_test)
-
-    add_executable(mpcc_stage_tangent_coordinates_test
-                   test/MpccStageTangentCoordinates.cpp)
-    target_link_libraries(mpcc_stage_tangent_coordinates_test PRIVATE Control)
-    add_test(NAME mpcc_stage_tangent_coordinates_test
-             COMMAND mpcc_stage_tangent_coordinates_test)
-
-    add_executable(common_progress_schedule_test test/CommonProgressSchedule.cpp)
-    target_link_libraries(common_progress_schedule_test PRIVATE Control)
-    add_test(NAME common_progress_schedule_test COMMAND common_progress_schedule_test)
+    add_control_test(rmpcc_prediction_test test/TrajectoryTracking/RmpccPrediction.cpp)
+    add_control_test(lie_algebra_mpc_prediction_test test/TrajectoryTracking/LieAlgebraMPCPrediction.cpp)
+    add_control_test(cartesian_mpcc_prediction_test test/TrajectoryTracking/CartesianMPCCPrediction.cpp)
+    add_control_test(rmpcc_cost_geometry_test test/TrajectoryTracking/RmpccCostGeometry.cpp)
+    add_control_test(rmpcc_full_residual_linearization_test test/TrajectoryTracking/RmpccFullResidualLinearization.cpp)
+    add_control_test(rmpcc_full_objective_directional_derivative_test test/TrajectoryTracking/RmpccFullObjectiveDirectionalDerivative.cpp)
+    add_control_test(rmpcc_decoupled_residual_linearization_test test/TrajectoryTracking/RmpccDecoupledResidualLinearization.cpp)
+    add_control_test(rmpcc_schedule_limit_test test/TrajectoryTracking/RmpccScheduleLimit.cpp)
+    add_control_test(mpcc_stage_tangent_coordinates_test test/TrajectoryTracking/MpccStageTangentCoordinates.cpp)
+    add_control_test(common_progress_schedule_test test/TrajectoryTracking/CommonProgressSchedule.cpp)
 endif()
 
 # Installation instructions

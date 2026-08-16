@@ -13,21 +13,44 @@ The classes build upon the [Model](../Model/README.md) sublibrary and provide a 
     Trajectory -- "Generates references for" --> Control
 ```
 
-## Serial Link Robots
+## Controller Families
 
-There are currently 2 classes available for control of serial link robotics, with a base class providing a standardised structure and API:
+Public headers are organized by controller purpose:
 
-  - [SerialLinkBase](doc/SerialLinkBase.md): A base class providing a standardised interface for all serial link control classes.
-  - [SerialLinkImpedance](doc/SerialLinkImpedance.md): Computes inertia-free joint and Cartesian impedance control.
-  - [SerialLinkKinematic](doc/SerialLinkKinematic.md): For joint trajectory tracking, and Cartesian velocity control (resolved motion rate control).
-  - SerialLinkDynamic: Under construction 🏗️.
+- `Control/Core`: shared serial-link interfaces, parameters, and resolved-rate control.
+- `Control/TrajectoryTracking`: kinematic, MPC, MPCC, and RMPCC trajectory trackers.
+- `Control/Contact`: admittance, impedance, and moving-frame contact controllers.
+
+Prediction, residual-linearisation, and progress-constraint helpers live under
+`src/TrajectoryTracking/detail`; they are implementation details and are not installed.
+
+The former flat forwarding headers are retained under
+`archive/legacy_flat_api` as migration references, but they are no longer installed.
+Consumers must use the categorized paths, for example:
+
+```cpp
+#include <Control/TrajectoryTracking/SerialLinkRMPCC.h>
+#include <Control/Contact/SerialLinkImpedance.h>
+```
+
+The main public controllers are:
+
+- [SerialLinkBase](doc/SerialLinkBase.md): common serial-link controller interface.
+- [SerialLinkKinematic](doc/SerialLinkKinematic.md): resolved-rate trajectory tracking.
+- `SerialLinkMPC`, `SerialLinkLieAlgebraMPC`, `SerialLinkMPCC`,
+  `SerialLinkCartesianMPCC`, and `SerialLinkRMPCC`: trajectory-tracking controllers.
+- [SerialLinkImpedance](doc/SerialLinkImpedance.md),
+  `AdmittanceContactController`, and `SerialLinkMovingFrameMPC`: contact-oriented controllers.
 
 ```mermaid
   graph TD
 
+      SerialLinkBase ---> SerialLinkVelocityBase
       SerialLinkBase ---> SerialLinkImpedance
-      SerialLinkBase ---> SerialLinkDynamic
-      SerialLinkBase ---> SerialLinkKinematic
+      SerialLinkVelocityBase ---> SerialLinkKinematic
+      SerialLinkVelocityBase ---> SerialLinkMPC
+      SerialLinkVelocityBase ---> SerialLinkMPCC
+      SerialLinkVelocityBase ---> SerialLinkRMPCC
 
 ```
 
