@@ -23,6 +23,14 @@ enum class RmpccObjectiveGeometry
     DecoupledCartesianSO3
 };
 
+enum class RmpccContourResidualGeometry
+{
+    LocalUnifiedSE3,
+    ExactAssociatedUnifiedSE3,
+    ScheduledDecoupledCartesianSO3,
+    AssociatedDecoupledCartesianSO3
+};
+
 enum class RmpccResidualLinearization
 {
     FrozenProjector,
@@ -38,7 +46,8 @@ enum class RmpccPhaseAssociation
 enum class RmpccLagPenalty
 {
     PhaseInducedPoseVector,
-    ScalarTaskDistance
+    ScalarTaskDistance,
+    ScalarPosePathArc
 };
 
 } } // namespace RobotLibrary::Control

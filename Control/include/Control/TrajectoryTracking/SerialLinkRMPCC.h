@@ -46,6 +46,8 @@
 
 namespace RobotLibrary { namespace Control {
 
+class RmpccPoseArcTable;
+
 /**
  * @brief Tuning parameters for the Riemannian MPCC controller.
  *
@@ -87,6 +89,8 @@ struct RmpccParameters
     // Riemannian tracking
     RmpccPredictorGeometry predictorGeometry = RmpccPredictorGeometry::ExactSE3;
     RmpccObjectiveGeometry objectiveGeometry = RmpccObjectiveGeometry::FullScrewSE3;
+    RmpccContourResidualGeometry contourResidualGeometry =
+        RmpccContourResidualGeometry::LocalUnifiedSE3;
     RmpccResidualLinearization residualLinearization =
         RmpccResidualLinearization::FullResidualJacobian;
     RmpccPhaseAssociation phaseAssociation = RmpccPhaseAssociation::MetricScrew;
@@ -104,6 +108,7 @@ struct RmpccParameters
     double runningLagTranslationScale = 1.0;    ///< Test-only scale on the translation block of running lag cost
     double runningLagRotationScale    = 1.0;    ///< Test-only scale on the rotation block of running lag cost
     double pathVelocityScale          = 1.0;    ///< Test-only scale on all path-velocity residual costs
+    double trackingCostScale          = 1.0;    ///< Common test-only scale on running/terminal contour and lag costs
     RmpccLagGeometry runningLagGeometry = RmpccLagGeometry::FullScrew; ///< Non-terminal contour/lag projection geometry
     Eigen::Matrix<double, TWIST_DIM, TWIST_DIM> metric =
         Eigen::Matrix<double, TWIST_DIM, TWIST_DIM>::Identity();
@@ -178,6 +183,14 @@ struct RmpccDiagnostics
     double phaseContamination = 0.0;
     double activePhaseCorrection = 0.0;
     double scalarLag = 0.0;
+    double poseArcLag = 0.0;
+    double associatedProgress = 0.0;
+    double associatedContourResidualNorm = 0.0;
+    double poseArcTableMinimumDensity = 0.0;
+    double poseArcTableMaximumDensity = 0.0;
+    double poseArcTableTotalLength = 0.0;
+    double poseArcTableResolution = 0.0;
+    double trackingCostScale = 1.0;
     double phaseDenominator = 0.0;
     bool phaseObservable = false;
     double contourResidualNorm = 0.0;
@@ -301,6 +314,7 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
 
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
         bool _trajectorySet = false;
+        std::shared_ptr<RmpccPoseArcTable> _poseArcTable;
 
         RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
         Eigen::Matrix4d _disturbance = Eigen::Matrix4d::Identity();
