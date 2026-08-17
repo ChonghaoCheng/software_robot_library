@@ -62,6 +62,14 @@ if(BUILD_TESTING)
     target_link_libraries(n125_task_phase_validation PRIVATE Control)
     target_include_directories(n125_task_phase_validation PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
+
+    # DIAG-01 exact-on-path identity gate. Formal execution supplies the two
+    # frozen task-frame path CSVs and an evidence output path.
+    add_executable(n135_diag01_zero_point
+        test/TrajectoryTracking/N135Diag01ZeroPoint.cpp)
+    target_link_libraries(n135_diag01_zero_point PRIVATE Control)
+    target_include_directories(n135_diag01_zero_point PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
 endif()
 
 # Installation instructions
