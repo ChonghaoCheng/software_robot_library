@@ -29,6 +29,10 @@ if(BUILD_TESTING)
     add_executable(discrete_integrator_lqr_test test/DiscreteIntegratorLQR.cpp)
     target_link_libraries(discrete_integrator_lqr_test PRIVATE Math)
     add_test(NAME discrete_integrator_lqr_test COMMAND discrete_integrator_lqr_test)
+
+    add_executable(triangular_substitution_test test/TriangularSubstitution.cpp)
+    target_link_libraries(triangular_substitution_test PRIVATE Math)
+    add_test(NAME triangular_substitution_test COMMAND triangular_substitution_test)
 endif()
 
 install(TARGETS  Math

@@ -186,7 +186,7 @@ backward_substitution(const Eigen::MatrixXd &U,
           {
                double sum = 0.0;
                
-               for(int k = j; k < m; k++) sum += U(j,k)*X(k,i);
+               for(int k = j + 1; k < m; k++) sum += U(j,k)*X(k,i);
                
                if(U(j,j) >= tolerance) X(j,i) = (Y(j,i)-sum)/U(j,j);
                else                    X(j,i) = 0.0;

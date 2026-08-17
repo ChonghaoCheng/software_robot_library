@@ -788,17 +788,9 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                                   inactiveSet.end());
             }
             
-            // Check to see if constraints have changed
-            bool noChange = true;
-            if (activeSet.size() == previousActiveSet.size())
-            {
-                for (int j = 0; j < activeSet.size(); ++j)
-                {
-                    noChange *= (activeSet[j] == previousActiveSet[j]);
-                }
-                
-                if (noChange) break;
-            }
+            // Keep iterating after a full step with the same working set. The
+            // next zero-step iteration checks active inequality multipliers and
+            // releases any constraint with the wrong KKT sign.
         }
             
     }
