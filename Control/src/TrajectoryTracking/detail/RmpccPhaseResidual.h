@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace RobotLibrary { namespace Control {
 
@@ -34,6 +35,9 @@ struct RmpccPhaseResiduals
     double taskPhaseCorrection = 0.0;
     double taskPhaseDenominator = 0.0;
     bool taskPhaseObservable = false;
+    double taskPoseFeaturePhaseCorrection = 0.0;
+    double taskPoseFeaturePhaseDenominator = 0.0;
+    bool taskPoseFeaturePhaseObservable = false;
 };
 
 struct RmpccPhaseResidualLinearization
@@ -55,6 +59,7 @@ rmpcc_phase_residuals(
     const RmpccPhaseAssociation phaseAssociation,
     const double metricRegularization,
     const double phaseDenominatorTolerance,
+    const double taskPoseFeatureRotationLength,
     ReferenceTransformFunction &&referenceTransform,
     ReferenceTangentFunction &&referenceTangent)
 {
@@ -87,27 +92,99 @@ rmpcc_phase_residuals(
             taskTangent.dot(taskError) / result.taskPhaseDenominator;
     }
 
-    if(phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ
-       && not result.taskPhaseObservable)
+    if(phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+       && (not std::isfinite(taskPoseFeatureRotationLength)
+           or taskPoseFeatureRotationLength <= 0.0))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [RMPCC PHASE RESIDUAL] TaskPoseFeature rotation length must be positive.");
+    }
+    const Eigen::Matrix3d referenceRotation = reference.block<3,3>(0,0);
+    const Eigen::Matrix3d actualRotation = actual.block<3,3>(0,0);
+    const Eigen::Vector3d angularTangent = tau.tail<3>();
+    Eigen::Vector<double,9> featureTangent =
+        Eigen::Vector<double,9>::Zero();
+    Eigen::Vector<double,9> featureError =
+        Eigen::Vector<double,9>::Zero();
+    featureTangent.head<3>() = taskTangent;
+    featureError.head<3>() = taskError;
+    for(int axis = 0; axis < 2; ++axis)
+    {
+        const Eigen::Vector3d basis = Eigen::Vector3d::Unit(axis);
+        featureTangent.segment<3>(3 + 3 * axis) =
+            taskPoseFeatureRotationLength * referenceRotation
+            * angularTangent.cross(basis);
+        featureError.segment<3>(3 + 3 * axis) =
+            taskPoseFeatureRotationLength
+            * (actualRotation.col(axis) - referenceRotation.col(axis));
+    }
+    result.taskPoseFeaturePhaseDenominator = featureTangent.squaredNorm();
+    result.taskPoseFeaturePhaseObservable =
+        std::isfinite(result.taskPoseFeaturePhaseDenominator)
+        && result.taskPoseFeaturePhaseDenominator > phaseDenominatorTolerance;
+    if(result.taskPoseFeaturePhaseObservable)
+    {
+        result.taskPoseFeaturePhaseCorrection =
+            featureTangent.dot(featureError)
+            / result.taskPoseFeaturePhaseDenominator;
+    }
+
+    const bool selectedObservable =
+        phaseAssociation == RmpccPhaseAssociation::MetricScrew
+        or (phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ
+            && result.taskPhaseObservable)
+        or (phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+            && result.taskPoseFeaturePhaseObservable);
+    if(not selectedObservable)
     {
         result.contour = eta;
-        result.phaseDenominator = result.taskPhaseDenominator;
+        result.phaseDenominator =
+            phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ
+            ? result.taskPhaseDenominator
+            : result.taskPoseFeaturePhaseDenominator;
         return result;
     }
 
-    result.phaseCorrection =
-        phaseAssociation == RmpccPhaseAssociation::MetricScrew
-        ? result.metricPhaseCorrection : result.taskPhaseCorrection;
-    result.phaseDenominator =
-        phaseAssociation == RmpccPhaseAssociation::MetricScrew
-        ? result.metricPhaseDenominator : result.taskPhaseDenominator;
-    result.phaseObservable = phaseAssociation == RmpccPhaseAssociation::MetricScrew
-        ? std::isfinite(result.metricPhaseCorrection)
-        : result.taskPhaseObservable;
+    if(phaseAssociation == RmpccPhaseAssociation::MetricScrew)
+    {
+        result.phaseCorrection = result.metricPhaseCorrection;
+        result.phaseDenominator = result.metricPhaseDenominator;
+        result.phaseObservable = std::isfinite(result.metricPhaseCorrection);
+    }
+    else if(phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ)
+    {
+        result.phaseCorrection = result.taskPhaseCorrection;
+        result.phaseDenominator = result.taskPhaseDenominator;
+        result.phaseObservable = result.taskPhaseObservable;
+    }
+    else
+    {
+        result.phaseCorrection = result.taskPoseFeaturePhaseCorrection;
+        result.phaseDenominator = result.taskPoseFeaturePhaseDenominator;
+        result.phaseObservable = result.taskPoseFeaturePhaseObservable;
+    }
     result.vectorLag = g * result.phaseCorrection;
     result.scalarLag = taskTangent.norm() * result.phaseCorrection;
     result.contour = eta - result.vectorLag;
     return result;
+}
+
+template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
+RmpccPhaseResiduals
+rmpcc_phase_residuals(
+    const RmpccStateVector &state,
+    const Eigen::Matrix<double,6,6> &metric,
+    const RmpccPhaseAssociation phaseAssociation,
+    const double metricRegularization,
+    const double phaseDenominatorTolerance,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    return rmpcc_phase_residuals(
+        state, metric, phaseAssociation, metricRegularization,
+        phaseDenominatorTolerance, 0.0,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ReferenceTangentFunction>(referenceTangent));
 }
 
 template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
@@ -118,6 +195,7 @@ rmpcc_linearize_phase_residuals(
     const RmpccPhaseAssociation phaseAssociation,
     const double metricRegularization,
     const double phaseDenominatorTolerance,
+    const double taskPoseFeatureRotationLength,
     const double finiteDifferenceStep,
     ReferenceTransformFunction &&referenceTransform,
     ReferenceTangentFunction &&referenceTangent)
@@ -133,7 +211,8 @@ rmpcc_linearize_phase_residuals(
     RmpccPhaseResidualLinearization result;
     result.residual = rmpcc_phase_residuals(
         state, metric, phaseAssociation, metricRegularization,
-        phaseDenominatorTolerance, transform, tangent);
+        phaseDenominatorTolerance, taskPoseFeatureRotationLength,
+        transform, tangent);
     for(int column = 0; column < 7; ++column)
     {
         RmpccStateVector plus = state;
@@ -153,10 +232,12 @@ rmpcc_linearize_phase_residuals(
         }
         const RmpccPhaseResiduals plusResidual = rmpcc_phase_residuals(
             plus, metric, phaseAssociation, metricRegularization,
-            phaseDenominatorTolerance, transform, tangent);
+            phaseDenominatorTolerance, taskPoseFeatureRotationLength,
+            transform, tangent);
         const RmpccPhaseResiduals minusResidual = rmpcc_phase_residuals(
             minus, metric, phaseAssociation, metricRegularization,
-            phaseDenominatorTolerance, transform, tangent);
+            phaseDenominatorTolerance, taskPoseFeatureRotationLength,
+            transform, tangent);
         result.contourJacobian.col(column) =
             (plusResidual.contour - minusResidual.contour) / denominator;
         result.vectorLagJacobian.col(column) =
@@ -165,6 +246,25 @@ rmpcc_linearize_phase_residuals(
             (plusResidual.scalarLag - minusResidual.scalarLag) / denominator;
     }
     return result;
+}
+
+template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
+RmpccPhaseResidualLinearization
+rmpcc_linearize_phase_residuals(
+    const RmpccStateVector &state,
+    const Eigen::Matrix<double,6,6> &metric,
+    const RmpccPhaseAssociation phaseAssociation,
+    const double metricRegularization,
+    const double phaseDenominatorTolerance,
+    const double finiteDifferenceStep,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    return rmpcc_linearize_phase_residuals(
+        state, metric, phaseAssociation, metricRegularization,
+        phaseDenominatorTolerance, 0.0, finiteDifferenceStep,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ReferenceTangentFunction>(referenceTangent));
 }
 
 } } // namespace RobotLibrary::Control

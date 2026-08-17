@@ -241,6 +241,7 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
         or _rmpcc.contourResidualGeometry
             == RmpccContourResidualGeometry::AssociatedDecoupledCartesianSO3;
     if((_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ
+        or _rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
         or _rmpcc.lagPenalty == RmpccLagPenalty::ScalarTaskDistance
         or _rmpcc.lagPenalty == RmpccLagPenalty::ScalarPosePathArc
         or associatedPhase)
@@ -249,6 +250,13 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
     {
         throw std::invalid_argument(
             "[ERROR] [SERIAL LINK RMPCC] Task-associated/scalar lag modes require FullResidualJacobian.");
+    }
+    if(_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+       && (not std::isfinite(_rmpcc.rotationCharacteristicLength)
+           or _rmpcc.rotationCharacteristicLength <= 0.0))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] TaskPoseFeature requires a positive rotationCharacteristicLength.");
     }
     if(_rmpcc.lagPenalty == RmpccLagPenalty::ScalarTaskDistance)
     {
@@ -322,9 +330,14 @@ SerialLinkRMPCC::objective_description() const
            << "; objective=";
     if(_rmpcc.objectiveGeometry == RmpccObjectiveGeometry::FullScrewSE3)
     {
-        stream << "phase="
-               << (_rmpcc.phaseAssociation == RmpccPhaseAssociation::MetricScrew
-                   ? "metric_screw" : "task_point_xyz")
+        stream << "phase=";
+        if(_rmpcc.phaseAssociation == RmpccPhaseAssociation::MetricScrew)
+            stream << "metric_screw";
+        else if(_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ)
+            stream << "task_point_xyz";
+        else
+            stream << "task_pose_feature";
+        stream
                << "; lag_penalty="
                << (_rmpcc.lagPenalty == RmpccLagPenalty::PhaseInducedPoseVector
                    ? "phase_induced_pose_vector"
@@ -559,6 +572,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const RmpccPhaseResiduals currentPhaseResidual = rmpcc_phase_residuals(
         currentState, _rmpcc.metric, _rmpcc.phaseAssociation,
         _rmpcc.hessianRegularization, _rmpcc.phaseDenominatorTolerance,
+        _rmpcc.rotationCharacteristicLength,
         currentReferenceTransformFunction, currentReferenceTangentFunction);
     const bool associatedPhaseFamily =
         _rmpcc.contourResidualGeometry
@@ -926,6 +940,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                         linearization.nominalNext, _rmpcc.metric,
                         _rmpcc.phaseAssociation, _rmpcc.hessianRegularization,
                         _rmpcc.phaseDenominatorTolerance,
+                        _rmpcc.rotationCharacteristicLength,
                         _rmpcc.rtiFiniteDifferenceStep,
                         referenceTransform, referenceTangent);
                 contourJacobian =

@@ -40,7 +40,8 @@ enum class RmpccResidualLinearization
 enum class RmpccPhaseAssociation
 {
     MetricScrew,
-    TaskPointXYZ
+    TaskPointXYZ,
+    TaskPoseFeature
 };
 
 enum class RmpccLagPenalty

@@ -97,7 +97,7 @@ struct RmpccParameters
     RmpccLagPenalty lagPenalty = RmpccLagPenalty::PhaseInducedPoseVector;
     double phaseDenominatorTolerance = 1e-12;
     double lagWeight                 = 10.0;     ///< Front-end convenience only; controller uses lagWeightMatrix
-    double rotationCharacteristicLength = 0.0;  ///< Front-end convenience only; controller uses metric exactly as supplied
+    double rotationCharacteristicLength = 0.0;  ///< Explicit l_R for experimental TaskPoseFeature; otherwise metric convenience
     double terminalPositionMultiplier = 1.0;    ///< Extra terminal contour weight for translation
     double terminalRotationMultiplier = 1.0;    ///< Extra terminal contour weight for rotation
     double terminalLagMultiplier      = 1.0;    ///< Extra terminal weight for the scalar lag component
