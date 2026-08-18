@@ -48,3 +48,14 @@ inspect and publish all three repositories with native Git:
 Commit only validated, in-scope changes; do not create empty commits in clean
 repositories. Push each current branch to its configured `origin`. Do not open
 a pull request unless the researcher explicitly asks for one.
+
+## Experiment record publication
+
+After an experiment or numerical audit finishes and its results have been
+validated, commit and push its canonical `/home/eric/Workspace/MPCC_ARA`
+record automatically as part of the same task. Include the machine-readable
+evidence and session trace. Do not wait for a separate submission request.
+
+Do not publish a failed or still-unverified result as complete, and do not
+bundle unrelated dirty-worktree changes. If the target branch, remote, or
+in-scope file set is ambiguous, report that ambiguity before publishing.
