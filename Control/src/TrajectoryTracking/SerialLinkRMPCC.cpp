@@ -10,6 +10,7 @@
 #include "detail/RmpccAssociatedPhase.h"
 #include "detail/RmpccProgressConstraints.h"
 #include "detail/RmpccQpConstraints.h"
+#include "detail/RmpccReferenceMotion.h"
 #include "detail/RmpccResidualLinearization.h"
 #include <Math/MathFunctions.h>
 
@@ -246,6 +247,19 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
         throw std::invalid_argument(
             "[ERROR] [SERIAL LINK RMPCC] rtiFiniteDifferenceStep must be positive.");
     }
+    if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+       && (not std::isfinite(_rmpcc.geometricTangentStep)
+           or _rmpcc.geometricTangentStep <= 0.0))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] StageConsistent reference motion requires a positive geometricTangentStep.");
+    }
+    if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+       && _rmpcc.predictorGeometry != RmpccPredictorGeometry::ExactSE3)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] StageConsistent reference motion requires the ExactSE3 predictor.");
+    }
     if(not std::isfinite(_rmpcc.phaseDenominatorTolerance)
        or _rmpcc.phaseDenominatorTolerance < 0.0)
     {
@@ -392,7 +406,13 @@ SerialLinkRMPCC::objective_description() const
                << "; contour_reference=s_hat"
                << "; lag_penalty=scalar_pose_path_arc";
     }
-    stream << "; path_velocity=sum ||u-Ad(E^-1)*tau*sdot||_Rv^2"
+    stream << "; reference_motion="
+           << (_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+               ? "stage_consistent" : "legacy_tangent_product")
+           << "; path_velocity="
+           << (_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+               ? "sum ||u-Ad(E^-1)*Log(T(s)^-1*T(s+dt*sdot))/dt||_Rv^2"
+               : "sum ||u-Ad(E^-1)*tau*sdot||_Rv^2")
            << "; input=sum ||u||_Ru^2; rate=sum ||Delta u||_Rdu^2"
            << "; progress_reward=-q_s*dt*sum(sdot); terminal=last-stage multipliers"
            << "; residual_linearization="
@@ -434,8 +454,18 @@ SerialLinkRMPCC::set_trajectory(const RobotLibrary::Trajectory::CartesianSpline 
             _rmpcc.lagWeightMatrix,
             [this](const double progress)
             {
-                return _trajectory.tangent_at_progress(
-                    progress, _rmpcc.tangentStep);
+                if(_rmpcc.referenceMotion
+                   == RmpccReferenceMotion::LegacyTangentProduct)
+                {
+                    return _trajectory.tangent_at_progress(
+                        progress, _rmpcc.tangentStep);
+                }
+                const auto reference = [this](const double s)
+                {
+                    return _trajectory.pose_at_progress(s).as_matrix();
+                };
+                return rmpcc_centred_geometric_tangent(
+                    progress, _rmpcc.geometricTangentStep, reference);
             },
             4097);
     }
@@ -614,7 +644,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             return cached->second;
         }
         const Eigen::Vector<double,TWIST_DIM> value =
-            _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+            _rmpcc.referenceMotion == RmpccReferenceMotion::LegacyTangentProduct
+            ? _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep)
+            : rmpcc_centred_geometric_tangent(
+                  progress, _rmpcc.geometricTangentStep, referenceTransform);
         referenceTangentCache.emplace(key, value);
         referenceTangentQueryTime += std::chrono::duration<double>(
             std::chrono::steady_clock::now() - start).count();
@@ -771,6 +804,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                   referenceTangent);
     };
 
+    _diagnostics.warmStartInvariantError = 0.0;
+    _diagnostics.warmStartInputBoundActive = 0.0;
     if(_warmStart.size() != variableDim)
     {
         _warmStart = VectorXd::Zero(variableDim);
@@ -783,13 +818,28 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             const int sOffset = progressOffset + stage;
             const double rate = clamp_value(_rmpcc.progressRateRef,
                                             lower(sOffset), upper(sOffset));
-            const Eigen::Vector<double,TWIST_DIM> tangent =
-                referenceTangent(guessState(6));
-            Eigen::Vector<double,TWIST_DIM> bodyTwist =
-                rmpcc_transport_reference_tangent(
+            Eigen::Vector<double,TWIST_DIM> bodyTwist;
+            if(_rmpcc.referenceMotion
+               == RmpccReferenceMotion::StageConsistent)
+            {
+                bodyTwist = rmpcc_stage_consistent_feedforward(
+                    guessState.head<TWIST_DIM>(), guessState(6), rate, dt,
+                    referenceTransform);
+            }
+            else
+            {
+                const Eigen::Vector<double,TWIST_DIM> tangent =
+                    referenceTangent(guessState(6));
+                bodyTwist = rmpcc_transport_reference_tangent(
                     guessState.head<TWIST_DIM>(), tangent) * rate;
+            }
             for(int component = 0; component < TWIST_DIM; ++component)
             {
+                if(bodyTwist(component) < lower(uOffset + component)
+                   or bodyTwist(component) > upper(uOffset + component))
+                {
+                    _diagnostics.warmStartInputBoundActive = 1.0;
+                }
                 bodyTwist(component) = clamp_value(bodyTwist(component),
                                                    lower(uOffset + component),
                                                    upper(uOffset + component));
@@ -800,7 +850,17 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             RmpccInputVector guessInput = RmpccInputVector::Zero();
             guessInput.head<TWIST_DIM>() = bodyTwist;
             guessInput(6) = rate;
-            guessState = propagate(guessState, guessInput);
+            const Eigen::Matrix4d previousRelative =
+                RobotLibrary::Math::se3_exponential(guessState.head<TWIST_DIM>());
+            const RmpccStateVector nextGuessState = propagate(guessState, guessInput);
+            const Eigen::Matrix4d nextRelative =
+                RobotLibrary::Math::se3_exponential(nextGuessState.head<TWIST_DIM>());
+            _diagnostics.warmStartInvariantError = std::max(
+                _diagnostics.warmStartInvariantError,
+                RobotLibrary::Math::se3_logarithm(
+                    RobotLibrary::Math::se3_inverse(previousRelative)
+                    * nextRelative).norm());
+            guessState = nextGuessState;
         }
     }
 
@@ -819,11 +879,15 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     VectorXd lagResidualOffset = VectorXd::Zero(errorDim);
     MatrixXd scalarLagResidualSensitivity = MatrixXd::Zero(N, variableDim);
     VectorXd scalarLagResidualOffset = VectorXd::Zero(N);
+    MatrixXd pathVelocityResidualSensitivity = MatrixXd::Zero(errorDim, variableDim);
+    VectorXd pathVelocityResidualOffset = VectorXd::Zero(errorDim);
     Eigen::Matrix<double,7,Eigen::Dynamic> stateSensitivity(7, variableDim);
     stateSensitivity.setZero();
 
     std::vector<RmpccStateVector> nominalStates(static_cast<size_t>(N + 1));
     std::vector<RmpccInputVector> nominalInputs(static_cast<size_t>(N));
+    std::vector<MatrixXd> stageStartStateSensitivities(
+        static_cast<size_t>(N), MatrixXd::Zero(7, variableDim));
     std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> contourProjections(
         static_cast<size_t>(N));
     std::vector<Eigen::Matrix<double,TWIST_DIM,TWIST_DIM>> lagProjections(
@@ -848,6 +912,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         RmpccInputVector &nominalInput = nominalInputs[static_cast<size_t>(stage)];
         nominalInput.head<TWIST_DIM>() = zNominal.segment<TWIST_DIM>(uOffset);
         nominalInput(6) = zNominal(sOffset);
+        stageStartStateSensitivities[static_cast<size_t>(stage)] = stateSensitivity;
 
         const auto rolloutStart = std::chrono::steady_clock::now();
         const RmpccStageLinearization linearization = linearize(
@@ -1153,24 +1218,51 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const int uOffset = stage * TWIST_DIM;
         const int sOffset = progressOffset + stage;
         const RmpccStateVector &stageState = nominalStates[static_cast<size_t>(stage)];
-        const Eigen::Vector<double,TWIST_DIM> tangent =
-            referenceTangent(stageState(6));
-        const Eigen::Vector<double,TWIST_DIM> transportedTangent =
-            rmpcc_transport_reference_tangent(
-                stageState.head<TWIST_DIM>(), tangent);
-        transportedTangents[static_cast<size_t>(stage)] = transportedTangent;
         const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
             _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
-
-        H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
-            2.0 * (_rmpcc.controlWeight + pathVelocityWeight);
-        H.block<TWIST_DIM,1>(uOffset, sOffset) +=
-            -2.0 * pathVelocityWeight * transportedTangent;
-        H.block<1,TWIST_DIM>(sOffset, uOffset) +=
-            -2.0 * transportedTangent.transpose() * pathVelocityWeight;
-        H(sOffset, sOffset) +=
-            2.0 * (transportedTangent.transpose()
-                   * pathVelocityWeight * transportedTangent)(0);
+        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent)
+        {
+            H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                2.0 * _rmpcc.controlWeight;
+            const RmpccPathVelocityResidualLinearization residualLinearization =
+                rmpcc_linearize_stage_consistent_path_velocity_residual(
+                    stageState, nominalInputs[static_cast<size_t>(stage)], dt,
+                    _rmpcc.rtiFiniteDifferenceStep, referenceTransform);
+            MatrixXd residualJacobian = residualLinearization.stateJacobian
+                * stageStartStateSensitivities[static_cast<size_t>(stage)];
+            residualJacobian.block<TWIST_DIM,TWIST_DIM>(0, uOffset) +=
+                residualLinearization.inputJacobian.leftCols<TWIST_DIM>();
+            residualJacobian.col(sOffset) +=
+                residualLinearization.inputJacobian.col(6);
+            const Eigen::Vector<double,TWIST_DIM> residualOffset =
+                residualLinearization.residual - residualJacobian * zNominal;
+            H += 2.0 * residualJacobian.transpose()
+                * pathVelocityWeight * residualJacobian;
+            f += 2.0 * residualJacobian.transpose()
+                * pathVelocityWeight * residualOffset;
+            pathVelocityResidualSensitivity.block(
+                stage * TWIST_DIM, 0, TWIST_DIM, variableDim) = residualJacobian;
+            pathVelocityResidualOffset.segment<TWIST_DIM>(stage * TWIST_DIM) =
+                residualOffset;
+        }
+        else
+        {
+            const Eigen::Vector<double,TWIST_DIM> tangent =
+                referenceTangent(stageState(6));
+            const Eigen::Vector<double,TWIST_DIM> transportedTangent =
+                rmpcc_transport_reference_tangent(
+                    stageState.head<TWIST_DIM>(), tangent);
+            transportedTangents[static_cast<size_t>(stage)] = transportedTangent;
+            H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                2.0 * (_rmpcc.controlWeight + pathVelocityWeight);
+            H.block<TWIST_DIM,1>(uOffset, sOffset) +=
+                -2.0 * pathVelocityWeight * transportedTangent;
+            H.block<1,TWIST_DIM>(sOffset, uOffset) +=
+                -2.0 * transportedTangent.transpose() * pathVelocityWeight;
+            H(sOffset, sOffset) +=
+                2.0 * (transportedTangent.transpose()
+                       * pathVelocityWeight * transportedTangent)(0);
+        }
 
         if(_rmpcc.progressRateWeight > 0.0)
         {
@@ -1221,6 +1313,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         hash_eigen(residualHash, lagResidualOffset);
         hash_eigen(residualHash, scalarLagResidualSensitivity);
         hash_eigen(residualHash, scalarLagResidualOffset);
+        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent)
+        {
+            hash_eigen(residualHash, pathVelocityResidualSensitivity);
+            hash_eigen(residualHash, pathVelocityResidualOffset);
+        }
         _diagnostics.stateLinearizationHash = stateLinearizationHash;
         _diagnostics.residualLinearizationHash = residualHash;
         std::uint64_t hessianHash = 1469598103934665603ULL;
@@ -1297,8 +1394,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.referenceLinearSpeed = (currentTau * _rmpcc.progressRateRef).head<3>().norm();
     _diagnostics.referenceAngularSpeed = (currentTau * _rmpcc.progressRateRef).tail<3>().norm();
     _diagnostics.feedforwardBodyTwist =
-        rmpcc_transport_reference_tangent(e0, currentTau)
-        * _diagnostics.progressRate;
+        _rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+        ? rmpcc_stage_consistent_feedforward(
+              e0, _pathProgress, _diagnostics.progressRate, dt,
+              referenceTransform)
+        : rmpcc_transport_reference_tangent(e0, currentTau)
+              * _diagnostics.progressRate;
     _diagnostics.correctionBodyTwist =
         _diagnostics.bodyTwist - _diagnostics.feedforwardBodyTwist;
     _diagnostics.linearVelocityLimitActive = 0.0;
@@ -1321,9 +1422,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.commandedAngularTwistNorm =
         _diagnostics.bodyTwist.tail<3>().norm();
     const Eigen::Vector<double,TWIST_DIM> pathVelocityResidual =
-        _diagnostics.bodyTwist
-        - rmpcc_transport_reference_tangent(e0, currentTau)
-          * _diagnostics.progressRate;
+        _diagnostics.bodyTwist - _diagnostics.feedforwardBodyTwist;
     _diagnostics.pathVelocityLinearResidual =
         pathVelocityResidual.head<3>().norm();
     _diagnostics.pathVelocityAngularResidual =
@@ -1394,6 +1493,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         lagResidualSensitivity * zOpt + lagResidualOffset;
     const VectorXd predictedScalarLagResiduals =
         scalarLagResidualSensitivity * zOpt + scalarLagResidualOffset;
+    const VectorXd predictedPathVelocityResiduals =
+        pathVelocityResidualSensitivity * zOpt + pathVelocityResidualOffset;
     const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
         _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
     for(int stage = 0; stage < N; ++stage)
@@ -1453,9 +1554,16 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                  * lagError.tail<3>())(0);
         }
 
-        const Eigen::Vector<double,TWIST_DIM> residual =
-            zOpt.segment<TWIST_DIM>(uOffset)
-            - transportedTangents[static_cast<size_t>(stage)] * zOpt(sOffset);
+        Eigen::Vector<double,TWIST_DIM> residual;
+        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent)
+        {
+            residual = predictedPathVelocityResiduals.segment<TWIST_DIM>(row);
+        }
+        else
+        {
+            residual = zOpt.segment<TWIST_DIM>(uOffset)
+                - transportedTangents[static_cast<size_t>(stage)] * zOpt(sOffset);
+        }
         _diagnostics.runningPathVelocityCost +=
             (residual.transpose() * pathVelocityWeight * residual)(0);
     }

@@ -78,6 +78,7 @@ struct RmpccParameters
 
     // Numerics
     double tangentStep               = 1e-3;     ///< Finite-difference step for tau(s)
+    double geometricTangentStep      = 1e-4;     ///< Centred Lie derivative step in experimental StageConsistent mode
     double rtiFiniteDifferenceStep   = 1e-6;     ///< Perturbation used for stage-wise RTI Jacobians
     double hessianRegularization     = 1e-8;     ///< Tikhonov term added to the QP Hessian
 
@@ -88,6 +89,8 @@ struct RmpccParameters
 
     // Riemannian tracking
     RmpccPredictorGeometry predictorGeometry = RmpccPredictorGeometry::ExactSE3;
+    RmpccReferenceMotion referenceMotion =
+        RmpccReferenceMotion::LegacyTangentProduct;
     RmpccObjectiveGeometry objectiveGeometry = RmpccObjectiveGeometry::FullScrewSE3;
     RmpccContourResidualGeometry contourResidualGeometry =
         RmpccContourResidualGeometry::LocalUnifiedSE3;
@@ -175,8 +178,10 @@ struct RmpccDiagnostics
     double maxAngularComponent = 0.0; ///< max_i |u_omega_i|
     Eigen::Vector<double,6> feedforwardBodyTwist = Eigen::Vector<double,6>::Zero();
     Eigen::Vector<double,6> correctionBodyTwist = Eigen::Vector<double,6>::Zero();
-    double pathVelocityLinearResidual = 0.0; ///< ||u_v - (Ad(E^-1) tau sdot)_v||
-    double pathVelocityAngularResidual = 0.0;///< ||u_w - (Ad(E^-1) tau sdot)_w||
+    double pathVelocityLinearResidual = 0.0; ///< Linear part of the selected reference-motion residual
+    double pathVelocityAngularResidual = 0.0;///< Angular part of the selected reference-motion residual
+    double warmStartInvariantError = 0.0; ///< Max ||Log(E_k^-1 E_(k+1))|| during feedforward warm initialization
+    double warmStartInputBoundActive = 0.0; ///< 1 if feedforward warm initialization required input clipping
     double lagErrorNorm           = 0.0;  ///< ||P_l e_0||, unweighted and unsigned
     double runningContourCost     = 0.0;  ///< Predicted non-terminal sum of weighted contour costs
     double runningLagCost         = 0.0;  ///< Predicted non-terminal sum of weighted lag costs

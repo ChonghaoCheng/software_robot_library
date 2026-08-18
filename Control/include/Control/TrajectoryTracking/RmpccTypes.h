@@ -9,6 +9,12 @@ enum class RmpccPredictorGeometry
     AdditiveLieAlgebra
 };
 
+enum class RmpccReferenceMotion
+{
+    LegacyTangentProduct,
+    StageConsistent
+};
+
 enum class RmpccLagGeometry
 {
     FullScrew,
