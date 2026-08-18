@@ -270,10 +270,23 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
         }
     }
     if(associatedPhase
-       && _rmpcc.phaseAssociation != RmpccPhaseAssociation::TaskPointXYZ)
+       && _rmpcc.phaseAssociation != RmpccPhaseAssociation::TaskPointXYZ
+       && _rmpcc.phaseAssociation != RmpccPhaseAssociation::TaskPoseFeature)
     {
         throw std::invalid_argument(
-            "[ERROR] [SERIAL LINK RMPCC] Associated contour residuals require TaskPointXYZ phase.");
+            "[ERROR] [SERIAL LINK RMPCC] Associated contour residuals require a task phase association.");
+    }
+    // TaskPoseFeature only reaches the cost through the associated family or
+    // through the full-screw phase family. Anywhere else it is silently inert,
+    // which would make an experiment look configured when it is not.
+    if(_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+       && not associatedPhase
+       && (_rmpcc.objectiveGeometry != RmpccObjectiveGeometry::FullScrewSE3
+           or _rmpcc.runningLagGeometry != RmpccLagGeometry::FullScrew))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK RMPCC] TaskPoseFeature has no cost effect for this objective "
+            "(it requires FullScrewSE3 with FullScrew running lag, or an associated contour residual).");
     }
     if(_rmpcc.contourResidualGeometry
            == RmpccContourResidualGeometry::AssociatedDecoupledCartesianSO3
@@ -356,7 +369,10 @@ SerialLinkRMPCC::objective_description() const
     if(_rmpcc.contourResidualGeometry
            == RmpccContourResidualGeometry::AssociatedDecoupledCartesianSO3)
     {
-        stream << "; associated_phase=task_point_xyz; contour_reference=s_hat"
+        stream << "; associated_phase="
+               << (_rmpcc.phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+                   ? "task_pose_feature" : "task_point_xyz")
+               << "; contour_reference=s_hat"
                << "; lag_penalty=scalar_pose_path_arc";
     }
     stream << "; path_velocity=sum ||u-Ad(E^-1)*tau*sdot||_Rv^2"
@@ -583,8 +599,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     if(associatedPhaseFamily)
     {
         currentAssociatedResidual = rmpcc_associated_residuals(
-            currentState, _rmpcc.contourResidualGeometry,
-            _rmpcc.phaseDenominatorTolerance, *_poseArcTable,
+            currentState, _rmpcc.contourResidualGeometry, _rmpcc.metric,
+            _rmpcc.phaseAssociation, _rmpcc.hessianRegularization,
+            _rmpcc.phaseDenominatorTolerance,
+            _rmpcc.rotationCharacteristicLength, *_poseArcTable,
             currentReferenceTransformFunction, currentReferenceTangentFunction);
     }
     // Preserve the legacy signed full-screw lag diagnostic even when the
@@ -886,8 +904,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 const RmpccAssociatedResidualLinearization residualLinearization =
                     rmpcc_linearize_associated_residuals(
                         linearization.nominalNext,
-                        _rmpcc.contourResidualGeometry,
+                        _rmpcc.contourResidualGeometry, _rmpcc.metric,
+                        _rmpcc.phaseAssociation, _rmpcc.hessianRegularization,
                         _rmpcc.phaseDenominatorTolerance,
+                        _rmpcc.rotationCharacteristicLength,
                         _rmpcc.rtiFiniteDifferenceStep, *_poseArcTable,
                         referenceTransform, referenceTangent);
                 contourJacobian =

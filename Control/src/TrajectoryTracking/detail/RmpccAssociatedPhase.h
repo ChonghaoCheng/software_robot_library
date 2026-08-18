@@ -7,6 +7,7 @@
 #define RMPCC_ASSOCIATED_PHASE_H
 
 #include "RmpccCostGeometry.h"
+#include "RmpccPhaseAssociation.h"
 #include "RmpccPrediction.h"
 
 #include <Control/TrajectoryTracking/RmpccTypes.h>
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace RobotLibrary { namespace Control {
@@ -128,6 +130,8 @@ struct RmpccAssociatedPhaseContext
         Eigen::Vector<double,6>::Zero();
     Eigen::Vector<double,6> tangentAtAssociatedProgress =
         Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> errorTangentAtInternalProgress =
+        Eigen::Vector<double,6>::Zero();
     double phaseDenominator = 0.0;
     double positionLag = 0.0;
     double poseArcLag = 0.0;
@@ -138,7 +142,11 @@ template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
 RmpccAssociatedPhaseContext
 rmpcc_associated_phase_context(
     const RmpccStateVector &state,
+    const Eigen::Matrix<double,6,6> &metric,
+    const RmpccPhaseAssociation phaseAssociation,
+    const double metricRegularization,
     const double phaseDenominatorTolerance,
+    const double taskPoseFeatureRotationLength,
     const RmpccPoseArcTable &poseArc,
     ReferenceTransformFunction &&referenceTransform,
     ReferenceTangentFunction &&referenceTangent)
@@ -150,20 +158,20 @@ rmpcc_associated_phase_context(
     result.predictedActualPose = result.referenceAtInternalProgress
         * RobotLibrary::Math::se3_exponential(state.head<6>());
 
-    const Eigen::Vector3d taskError =
-        result.predictedActualPose.block<3,1>(0,3)
-        - result.referenceAtInternalProgress.block<3,1>(0,3);
-    const Eigen::Vector3d taskTangent =
-        result.referenceAtInternalProgress.block<3,3>(0,0)
-        * result.tangentAtInternalProgress.head<3>();
-    result.phaseDenominator = taskTangent.squaredNorm();
-    result.observable = std::isfinite(result.phaseDenominator)
-        && result.phaseDenominator > phaseDenominatorTolerance;
-    if(result.observable)
-    {
-        result.phaseCorrection =
-            taskTangent.dot(taskError) / result.phaseDenominator;
-    }
+    result.errorTangentAtInternalProgress =
+        rmpcc_error_coordinate_path_tangent(
+            state.head<6>(), result.tangentAtInternalProgress);
+
+    const RmpccPhaseAssociationState phase = rmpcc_evaluate_phase_association(
+        state.head<6>(), result.errorTangentAtInternalProgress,
+        result.referenceAtInternalProgress, result.predictedActualPose,
+        result.tangentAtInternalProgress, metric, phaseAssociation,
+        metricRegularization, phaseDenominatorTolerance,
+        taskPoseFeatureRotationLength);
+    const Eigen::Vector3d taskTangent = phase.taskTangent;
+    result.phaseDenominator = phase.denominator;
+    result.observable = phase.observable;
+    result.phaseCorrection = phase.correction;
     result.associatedProgress = std::clamp(
         result.internalProgress + result.phaseCorrection, 0.0, 1.0);
     result.referenceAtAssociatedProgress =
@@ -200,14 +208,19 @@ RmpccAssociatedResiduals
 rmpcc_associated_residuals(
     const RmpccStateVector &state,
     const RmpccContourResidualGeometry contourGeometry,
+    const Eigen::Matrix<double,6,6> &metric,
+    const RmpccPhaseAssociation phaseAssociation,
+    const double metricRegularization,
     const double phaseDenominatorTolerance,
+    const double taskPoseFeatureRotationLength,
     const RmpccPoseArcTable &poseArc,
     ReferenceTransformFunction &&referenceTransform,
     ReferenceTangentFunction &&referenceTangent)
 {
     RmpccAssociatedResiduals result;
     result.context = rmpcc_associated_phase_context(
-        state, phaseDenominatorTolerance, poseArc,
+        state, metric, phaseAssociation, metricRegularization,
+        phaseDenominatorTolerance, taskPoseFeatureRotationLength, poseArc,
         referenceTransform, referenceTangent);
     const Eigen::Matrix4d relative =
         RobotLibrary::Math::se3_inverse(
@@ -218,10 +231,8 @@ rmpcc_associated_residuals(
     result.contour = contourGeometry
             == RmpccContourResidualGeometry::AssociatedDecoupledCartesianSO3
         ? rmpcc_decoupled_error(exactGroup) : exactGroup;
-    const Eigen::Vector<double,6> errorTangent =
-        rmpcc_error_coordinate_path_tangent(
-            state.head<6>(), result.context.tangentAtInternalProgress);
-    result.vectorLag = errorTangent * result.context.phaseCorrection;
+    result.vectorLag = result.context.errorTangentAtInternalProgress
+        * result.context.phaseCorrection;
     result.scalarPoseArcLag = result.context.poseArcLag;
     return result;
 }
@@ -231,7 +242,11 @@ RmpccAssociatedResidualLinearization
 rmpcc_linearize_associated_residuals(
     const RmpccStateVector &state,
     const RmpccContourResidualGeometry contourGeometry,
+    const Eigen::Matrix<double,6,6> &metric,
+    const RmpccPhaseAssociation phaseAssociation,
+    const double metricRegularization,
     const double phaseDenominatorTolerance,
+    const double taskPoseFeatureRotationLength,
     const double finiteDifferenceStep,
     const RmpccPoseArcTable &poseArc,
     ReferenceTransformFunction &&referenceTransform,
@@ -246,8 +261,9 @@ rmpcc_linearize_associated_residuals(
     auto &&tangent = referenceTangent;
     RmpccAssociatedResidualLinearization result;
     result.residual = rmpcc_associated_residuals(
-        state, contourGeometry, phaseDenominatorTolerance, poseArc,
-        transform, tangent);
+        state, contourGeometry, metric, phaseAssociation,
+        metricRegularization, phaseDenominatorTolerance,
+        taskPoseFeatureRotationLength, poseArc, transform, tangent);
     for(int column = 0; column < 7; ++column)
     {
         RmpccStateVector plus = state;
@@ -267,12 +283,14 @@ rmpcc_linearize_associated_residuals(
         }
         const RmpccAssociatedResiduals plusResidual =
             rmpcc_associated_residuals(
-                plus, contourGeometry, phaseDenominatorTolerance, poseArc,
-                transform, tangent);
+                plus, contourGeometry, metric, phaseAssociation,
+                metricRegularization, phaseDenominatorTolerance,
+                taskPoseFeatureRotationLength, poseArc, transform, tangent);
         const RmpccAssociatedResiduals minusResidual =
             rmpcc_associated_residuals(
-                minus, contourGeometry, phaseDenominatorTolerance, poseArc,
-                transform, tangent);
+                minus, contourGeometry, metric, phaseAssociation,
+                metricRegularization, phaseDenominatorTolerance,
+                taskPoseFeatureRotationLength, poseArc, transform, tangent);
         result.contourJacobian.col(column) =
             (plusResidual.contour - minusResidual.contour) / denominator;
         result.vectorLagJacobian.col(column) =
@@ -282,6 +300,44 @@ rmpcc_linearize_associated_residuals(
             / denominator;
     }
     return result;
+}
+
+/** Legacy TaskPointXYZ-only overloads; behaviour is bit-identical to before. */
+template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
+RmpccAssociatedResiduals
+rmpcc_associated_residuals(
+    const RmpccStateVector &state,
+    const RmpccContourResidualGeometry contourGeometry,
+    const double phaseDenominatorTolerance,
+    const RmpccPoseArcTable &poseArc,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    return rmpcc_associated_residuals(
+        state, contourGeometry, Eigen::Matrix<double,6,6>::Identity(),
+        RmpccPhaseAssociation::TaskPointXYZ, 0.0, phaseDenominatorTolerance,
+        0.0, poseArc,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ReferenceTangentFunction>(referenceTangent));
+}
+
+template<typename ReferenceTransformFunction, typename ReferenceTangentFunction>
+RmpccAssociatedResidualLinearization
+rmpcc_linearize_associated_residuals(
+    const RmpccStateVector &state,
+    const RmpccContourResidualGeometry contourGeometry,
+    const double phaseDenominatorTolerance,
+    const double finiteDifferenceStep,
+    const RmpccPoseArcTable &poseArc,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent)
+{
+    return rmpcc_linearize_associated_residuals(
+        state, contourGeometry, Eigen::Matrix<double,6,6>::Identity(),
+        RmpccPhaseAssociation::TaskPointXYZ, 0.0, phaseDenominatorTolerance,
+        0.0, finiteDifferenceStep, poseArc,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ReferenceTangentFunction>(referenceTangent));
 }
 
 } } // namespace RobotLibrary::Control

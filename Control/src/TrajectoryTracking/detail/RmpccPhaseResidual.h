@@ -6,6 +6,7 @@
 #ifndef RMPCC_PHASE_RESIDUAL_H
 #define RMPCC_PHASE_RESIDUAL_H
 
+#include "RmpccPhaseAssociation.h"
 #include "RmpccPrediction.h"
 
 #include <Control/TrajectoryTracking/RmpccTypes.h>
@@ -68,66 +69,23 @@ rmpcc_phase_residuals(
     const Eigen::Vector<double,6> tau = referenceTangent(state(6));
     const Eigen::Vector<double,6> g =
         rmpcc_error_coordinate_path_tangent(eta, tau);
-
-    RmpccPhaseResiduals result;
-    result.metricPhaseDenominator = (g.transpose() * metric * g)(0);
-    const double metricDenominator =
-        std::max(result.metricPhaseDenominator, metricRegularization);
-    result.metricPhaseCorrection =
-        (g.transpose() * metric * eta)(0) / metricDenominator;
-
     const Eigen::Matrix4d actual =
         reference * RobotLibrary::Math::se3_exponential(eta);
-    const Eigen::Vector3d taskError =
-        actual.block<3,1>(0,3) - reference.block<3,1>(0,3);
-    const Eigen::Vector3d taskTangent =
-        reference.block<3,3>(0,0) * tau.head<3>();
-    result.taskPhaseDenominator = taskTangent.squaredNorm();
-    result.taskPhaseObservable =
-        std::isfinite(result.taskPhaseDenominator)
-        && result.taskPhaseDenominator > phaseDenominatorTolerance;
-    if(result.taskPhaseObservable)
-    {
-        result.taskPhaseCorrection =
-            taskTangent.dot(taskError) / result.taskPhaseDenominator;
-    }
 
-    if(phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
-       && (not std::isfinite(taskPoseFeatureRotationLength)
-           or taskPoseFeatureRotationLength <= 0.0))
-    {
-        throw std::invalid_argument(
-            "[ERROR] [RMPCC PHASE RESIDUAL] TaskPoseFeature rotation length must be positive.");
-    }
-    const Eigen::Matrix3d referenceRotation = reference.block<3,3>(0,0);
-    const Eigen::Matrix3d actualRotation = actual.block<3,3>(0,0);
-    const Eigen::Vector3d angularTangent = tau.tail<3>();
-    Eigen::Vector<double,9> featureTangent =
-        Eigen::Vector<double,9>::Zero();
-    Eigen::Vector<double,9> featureError =
-        Eigen::Vector<double,9>::Zero();
-    featureTangent.head<3>() = taskTangent;
-    featureError.head<3>() = taskError;
-    for(int axis = 0; axis < 2; ++axis)
-    {
-        const Eigen::Vector3d basis = Eigen::Vector3d::Unit(axis);
-        featureTangent.segment<3>(3 + 3 * axis) =
-            taskPoseFeatureRotationLength * referenceRotation
-            * angularTangent.cross(basis);
-        featureError.segment<3>(3 + 3 * axis) =
-            taskPoseFeatureRotationLength
-            * (actualRotation.col(axis) - referenceRotation.col(axis));
-    }
-    result.taskPoseFeaturePhaseDenominator = featureTangent.squaredNorm();
-    result.taskPoseFeaturePhaseObservable =
-        std::isfinite(result.taskPoseFeaturePhaseDenominator)
-        && result.taskPoseFeaturePhaseDenominator > phaseDenominatorTolerance;
-    if(result.taskPoseFeaturePhaseObservable)
-    {
-        result.taskPoseFeaturePhaseCorrection =
-            featureTangent.dot(featureError)
-            / result.taskPoseFeaturePhaseDenominator;
-    }
+    const RmpccPhaseAssociationState phase = rmpcc_evaluate_phase_association(
+        eta, g, reference, actual, tau, metric, phaseAssociation,
+        metricRegularization, phaseDenominatorTolerance,
+        taskPoseFeatureRotationLength);
+
+    RmpccPhaseResiduals result;
+    result.metricPhaseDenominator = phase.metricDenominator;
+    result.metricPhaseCorrection = phase.metricCorrection;
+    result.taskPhaseDenominator = phase.taskDenominator;
+    result.taskPhaseObservable = phase.taskObservable;
+    result.taskPhaseCorrection = phase.taskCorrection;
+    result.taskPoseFeaturePhaseDenominator = phase.featureDenominator;
+    result.taskPoseFeaturePhaseObservable = phase.featureObservable;
+    result.taskPoseFeaturePhaseCorrection = phase.featureCorrection;
 
     const bool selectedObservable =
         phaseAssociation == RmpccPhaseAssociation::MetricScrew
@@ -145,26 +103,14 @@ rmpcc_phase_residuals(
         return result;
     }
 
-    if(phaseAssociation == RmpccPhaseAssociation::MetricScrew)
-    {
-        result.phaseCorrection = result.metricPhaseCorrection;
-        result.phaseDenominator = result.metricPhaseDenominator;
-        result.phaseObservable = std::isfinite(result.metricPhaseCorrection);
-    }
-    else if(phaseAssociation == RmpccPhaseAssociation::TaskPointXYZ)
-    {
-        result.phaseCorrection = result.taskPhaseCorrection;
-        result.phaseDenominator = result.taskPhaseDenominator;
-        result.phaseObservable = result.taskPhaseObservable;
-    }
-    else
-    {
-        result.phaseCorrection = result.taskPoseFeaturePhaseCorrection;
-        result.phaseDenominator = result.taskPoseFeaturePhaseDenominator;
-        result.phaseObservable = result.taskPoseFeaturePhaseObservable;
-    }
+    result.phaseCorrection = phase.correction;
+    result.phaseDenominator = phase.denominator;
+    result.phaseObservable = phase.observable;
+    // ScalarTaskDistance semantics are deliberately unchanged: the scalar lag
+    // is the physical task-point along-path distance |t_p| delta_s, in metres,
+    // whichever association produced delta_s.
     result.vectorLag = g * result.phaseCorrection;
-    result.scalarLag = taskTangent.norm() * result.phaseCorrection;
+    result.scalarLag = phase.taskTangent.norm() * result.phaseCorrection;
     result.contour = eta - result.vectorLag;
     return result;
 }

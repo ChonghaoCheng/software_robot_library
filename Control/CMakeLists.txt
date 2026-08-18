@@ -40,6 +40,8 @@ if(BUILD_TESTING)
     add_control_test(rmpcc_full_objective_directional_derivative_test test/TrajectoryTracking/RmpccFullObjectiveDirectionalDerivative.cpp)
     add_control_test(rmpcc_phase_residual_test test/TrajectoryTracking/RmpccPhaseResidual.cpp)
     add_control_test(rmpcc_residual_non_expansion_test test/TrajectoryTracking/RmpccResidualNonExpansion.cpp)
+    add_control_test(rmpcc_associated_phase_conditioning_test test/TrajectoryTracking/RmpccAssociatedPhaseConditioning.cpp)
+    add_control_test(rmpcc_phase_association_profiles_test test/TrajectoryTracking/RmpccPhaseAssociationProfiles.cpp)
     add_control_test(n126_associated_phase_test test/TrajectoryTracking/N126AssociatedPhase.cpp)
     target_include_directories(n126_associated_phase_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
