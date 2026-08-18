@@ -58,6 +58,10 @@ class Polynomial
         RobotLibrary::Math::FunctionPoint
         evaluate_point(const double &input);
 
+        /** Evaluate only f(x), without forming either derivative. */
+        double
+        evaluate_value(const double &input);
+
     private:
     
         unsigned int _order;                                                                        ///< Degrees of freedom in the polynomial.

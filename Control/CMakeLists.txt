@@ -73,6 +73,12 @@ if(BUILD_TESTING)
     target_link_libraries(n135_diag01_zero_point PRIVATE Control)
     target_include_directories(n135_diag01_zero_point PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
+
+    # Offline solver-component timing utility used by PERF-01. It is not a
+    # CTest because timings are machine/environment dependent.
+    add_executable(rmpcc_perf01_benchmark
+        test/TrajectoryTracking/RmpccPerf01Benchmark.cpp)
+    target_link_libraries(rmpcc_perf01_benchmark PRIVATE Control)
 endif()
 
 # Installation instructions

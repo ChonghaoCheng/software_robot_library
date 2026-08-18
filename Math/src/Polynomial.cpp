@@ -106,4 +106,15 @@ Polynomial::evaluate_point(const double &input)
     return output;
 }
 
+double
+Polynomial::evaluate_value(const double &input)
+{
+    double output = 0.0;
+    for(int i = 0; i <= this->_order; ++i)
+    {
+        output += this->_coefficients(i) * pow(input, i);
+    }
+    return output;
+}
+
 } } // namespace

@@ -23,6 +23,12 @@ if(BUILD_TESTING)
     target_link_libraries(cartesian_spline_quaternion_hemisphere_test PRIVATE Trajectory)
     add_test(NAME cartesian_spline_quaternion_hemisphere_test
              COMMAND cartesian_spline_quaternion_hemisphere_test)
+
+    add_executable(cartesian_spline_pose_only_test
+                   test/CartesianSplinePoseOnly.cpp)
+    target_link_libraries(cartesian_spline_pose_only_test PRIVATE Trajectory)
+    add_test(NAME cartesian_spline_pose_only_test
+             COMMAND cartesian_spline_pose_only_test)
 endif()
 
 install(TARGETS  Trajectory

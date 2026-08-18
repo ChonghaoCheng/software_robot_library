@@ -87,4 +87,21 @@ Spline::evaluate_point(const double &input)
     return this->_polynomial.back().evaluate_point(this->_points.back());
 }
 
+double
+Spline::evaluate_value(const double &input)
+{
+    if(input <= this->_points.front())
+    {
+        return this->_polynomial.front().evaluate_value(this->_points.front());
+    }
+    for(int i = 0; i < this->_points.size()-1; ++i)
+    {
+        if(input < this->_points[i+1])
+        {
+            return this->_polynomial[i].evaluate_value(input);
+        }
+    }
+    return this->_polynomial.back().evaluate_value(this->_points.back());
+}
+
 } } // namespace

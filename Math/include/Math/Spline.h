@@ -50,6 +50,10 @@ class Spline
          */
         RobotLibrary::Math::FunctionPoint
         evaluate_point(const double &input);
+
+        /** Evaluate only the interpolated scalar value. */
+        double
+        evaluate_value(const double &input);
     
     private:
     

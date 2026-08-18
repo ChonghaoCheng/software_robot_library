@@ -71,6 +71,10 @@ class CartesianSpline
         RobotLibrary::Trajectory::CartesianState
         query_state(const double &time);
 
+        /** Query only the pose, without spline derivatives or twist conversion. */
+        RobotLibrary::Model::Pose
+        query_pose(const double &time);
+
         /**
          * @brief As it says.
          */

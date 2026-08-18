@@ -167,4 +167,18 @@ SplineTrajectory::query_state(const double &time)
     }
 }
 
+Eigen::VectorXd
+SplineTrajectory::query_position(const double &time)
+{
+         if(time <= this->_startTime) return this->_startPoint.position;
+    else if(time >= this->_endTime)   return this->_endPoint.position;
+
+    Eigen::VectorXd position = Eigen::VectorXd::Zero(this->_dimensions);
+    for(int i = 0; i < this->_dimensions; ++i)
+    {
+        position(i) = this->_spline[i].evaluate_value(time);
+    }
+    return position;
+}
+
 } } // namespace

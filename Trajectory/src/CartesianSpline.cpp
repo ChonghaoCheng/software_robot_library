@@ -140,6 +140,25 @@ CartesianSpline::query_state(const double &time)
     return returnValue;
 }
 
+RobotLibrary::Model::Pose
+CartesianSpline::query_pose(const double &time)
+{
+    const Eigen::VectorXd position = this->_spline.query_position(time);
+    const double angle = position.tail(3).norm();
+    if(angle < 1e-04)
+    {
+        return RobotLibrary::Model::Pose(
+            position.head(3), Eigen::Quaterniond(1,0,0,0));
+    }
+    const Eigen::Vector3d axis = position.tail(3).normalized();
+    return RobotLibrary::Model::Pose(
+        position.head(3),
+        Eigen::Quaterniond(cos(0.5*angle),
+                           sin(0.5*angle)*axis(0),
+                           sin(0.5*angle)*axis(1),
+                           sin(0.5*angle)*axis(2)));
+}
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
  //                       Map normalised progress s in [0,1] to trajectory time                     //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -156,7 +175,7 @@ CartesianSpline::progress_to_time(const double &progress) const
 RobotLibrary::Model::Pose
 CartesianSpline::pose_at_progress(const double &progress)
 {
-    return this->query_state(progress_to_time(progress)).pose;
+    return this->query_pose(progress_to_time(progress));
 }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -66,6 +66,10 @@ class SplineTrajectory : public RobotLibrary::Trajectory::TrajectoryBase
          */
         RobotLibrary::Trajectory::State
         query_state(const double &time);
+
+        /** Query only the interpolated position coordinates. */
+        Eigen::VectorXd
+        query_position(const double &time);
     
     private:
         

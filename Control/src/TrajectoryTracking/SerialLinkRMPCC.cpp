@@ -18,12 +18,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 using RobotLibrary::Math::se3_logarithm;
@@ -46,6 +48,21 @@ Eigen::Matrix4d pose_to_matrix(const RobotLibrary::Model::Pose &pose)
     T.block<3,3>(0,0) = q.toRotationMatrix();
     T.block<3,1>(0,3) = pose.translation();
     return T;
+}
+
+template<typename Derived>
+void hash_eigen(std::uint64_t &hash, const Eigen::MatrixBase<Derived> &value)
+{
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    const unsigned char *bytes = reinterpret_cast<const unsigned char *>(
+        value.derived().data());
+    const std::size_t byteCount = static_cast<std::size_t>(value.size())
+        * sizeof(typename Derived::Scalar);
+    for(std::size_t i = 0; i < byteCount; ++i)
+    {
+        hash ^= bytes[i];
+        hash *= prime;
+    }
 }
 
 RobotLibrary::Model::Pose matrix_to_pose(const Eigen::Matrix4d &T)
@@ -544,6 +561,67 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
 
+    const auto totalSolveStart = std::chrono::steady_clock::now();
+    double referencePoseQueryTime = 0.0;
+    double referenceTangentQueryTime = 0.0;
+    std::uint64_t referencePoseQueryCount = 0;
+    std::uint64_t referenceTangentQueryCount = 0;
+    std::uint64_t referencePoseRequestCount = 0;
+    std::uint64_t referenceTangentRequestCount = 0;
+    double rolloutLinearizationTime = 0.0;
+    double residualHessianTime = 0.0;
+    const bool numericalAudit = std::getenv("ROBOT_LIBRARY_RMPCC_NUMERICAL_AUDIT") != nullptr;
+    std::uint64_t stateLinearizationHash = 1469598103934665603ULL;
+    std::unordered_map<std::uint64_t, Eigen::Matrix4d> referenceTransformCache;
+    std::unordered_map<std::uint64_t, Eigen::Vector<double,TWIST_DIM>> referenceTangentCache;
+    const auto progressKey = [](const double progress)
+    {
+        std::uint64_t key = 0;
+        static_assert(sizeof(key) == sizeof(progress));
+        std::memcpy(&key, &progress, sizeof(key));
+        return key;
+    };
+    const auto referenceTransform = [&](const double progress)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        ++referencePoseRequestCount;
+        const std::uint64_t key = progressKey(progress);
+        const auto cached = referenceTransformCache.find(key);
+        if(cached != referenceTransformCache.end())
+        {
+            referencePoseQueryTime += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            return cached->second;
+        }
+        const Eigen::Matrix4d value =
+            reference_transform_in_trajectory_frame(progress);
+        referenceTransformCache.emplace(key, value);
+        referencePoseQueryTime += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start).count();
+        ++referencePoseQueryCount;
+        return value;
+    };
+    const auto referenceTangent = [&](const double progress)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        ++referenceTangentRequestCount;
+        const std::uint64_t key = progressKey(progress);
+        const auto cached = referenceTangentCache.find(key);
+        if(cached != referenceTangentCache.end())
+        {
+            referenceTangentQueryTime += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start).count();
+            return cached->second;
+        }
+        const Eigen::Vector<double,TWIST_DIM> value =
+            _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+        referenceTangentCache.emplace(key, value);
+        referenceTangentQueryTime += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start).count();
+        ++referenceTangentQueryCount;
+        return value;
+    };
+
     _diagnostics.qpStatus = 0.0;
     _diagnostics.fallbackUsed = false;
     const std::uint64_t controlStepIndex = _controlStepIndex++;
@@ -559,7 +637,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     // Both operands are expressed directly in the active trajectory frame.
     // Their relative transform is invariant to the frame's base transform.
     const Eigen::Matrix4d currentReferenceTransform =
-        reference_transform_in_trajectory_frame(_pathProgress);
+        referenceTransform(_pathProgress);
     const Eigen::Matrix4d relativeTransform =
         se3_inverse(currentReferenceTransform) * currentTransformInTrajectoryFrame;
     const Eigen::Vector<double, TWIST_DIM> e0 = se3_logarithm(relativeTransform);
@@ -571,19 +649,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const double se3ErrorNorm = e0.norm();
     const double rotationError = e0.tail<3>().norm();
     const Eigen::Vector<double, TWIST_DIM> currentTau =
-        _trajectory.tangent_at_progress(_pathProgress, _rmpcc.tangentStep);
+        referenceTangent(_pathProgress);
     const Eigen::Vector<double, TWIST_DIM> currentErrorTangent =
         rmpcc_error_coordinate_path_tangent(e0, currentTau);
     RmpccStateVector currentState = RmpccStateVector::Zero();
     currentState.head<TWIST_DIM>() = e0;
     currentState(6) = _pathProgress;
-    const auto currentReferenceTransformFunction = [this](const double progress)
+    const auto currentReferenceTransformFunction = [&](const double progress)
     {
-        return reference_transform_in_trajectory_frame(progress);
+        return referenceTransform(progress);
     };
-    const auto currentReferenceTangentFunction = [this](const double progress)
+    const auto currentReferenceTangentFunction = [&](const double progress)
     {
-        return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+        return referenceTangent(progress);
     };
     const RmpccPhaseResiduals currentPhaseResidual = rmpcc_phase_residuals(
         currentState, _rmpcc.metric, _rmpcc.phaseAssociation,
@@ -640,6 +718,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const double progressRateMax = _rmpcc.progressRateMax;
     const double progressRateMin = std::min(_rmpcc.progressRateMin, progressRateMax);
 
+    const auto constraintStart = std::chrono::steady_clock::now();
     VectorXd lower = VectorXd::Zero(variableDim);
     VectorXd upper = VectorXd::Zero(variableDim);
     const bool relaxForCompletion =
@@ -670,15 +749,9 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const VectorXd &yeq = qpConstraints.yeq;
     const MatrixXd &Bineq = qpConstraints.Bineq;
     const VectorXd &zineq = qpConstraints.zineq;
-
-    const auto referenceTransform = [this](const double progress)
-    {
-        return reference_transform_in_trajectory_frame(progress);
-    };
-    const auto referenceTangent = [this](const double progress)
-    {
-        return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
-    };
+    _diagnostics.constraintConstructionTimeSeconds =
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - constraintStart).count();
     const auto propagate = [&](const RmpccStateVector &state,
                                const RmpccInputVector &input)
     {
@@ -711,7 +784,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             const double rate = clamp_value(_rmpcc.progressRateRef,
                                             lower(sOffset), upper(sOffset));
             const Eigen::Vector<double,TWIST_DIM> tangent =
-                _trajectory.tangent_at_progress(guessState(6), _rmpcc.tangentStep);
+                referenceTangent(guessState(6));
             Eigen::Vector<double,TWIST_DIM> bodyTwist =
                 rmpcc_transport_reference_tangent(
                     guessState.head<TWIST_DIM>(), tangent) * rate;
@@ -776,8 +849,15 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         nominalInput.head<TWIST_DIM>() = zNominal.segment<TWIST_DIM>(uOffset);
         nominalInput(6) = zNominal(sOffset);
 
+        const auto rolloutStart = std::chrono::steady_clock::now();
         const RmpccStageLinearization linearization = linearize(
             nominalStates[static_cast<size_t>(stage)], nominalInput);
+        if(numericalAudit)
+        {
+            hash_eigen(stateLinearizationHash, linearization.nominalNext);
+            hash_eigen(stateLinearizationHash, linearization.stateJacobian);
+            hash_eigen(stateLinearizationHash, linearization.inputJacobian);
+        }
         nominalStates[static_cast<size_t>(stage + 1)] = linearization.nominalNext;
 
         stateSensitivity = linearization.stateJacobian * stateSensitivity;
@@ -787,13 +867,16 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 linearization.inputJacobian.col(component);
         }
         stateSensitivity.col(sOffset) += linearization.inputJacobian.col(6);
+        rolloutLinearizationTime += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - rolloutStart).count();
+        const auto residualStart = std::chrono::steady_clock::now();
 
         const int row = stage * TWIST_DIM;
         const MatrixXd stageSensitivity = stateSensitivity.topRows(TWIST_DIM);
 
         const double predictedProgress = linearization.nominalNext(6);
         const Eigen::Vector<double,TWIST_DIM> stageReferenceTangent =
-            _trajectory.tangent_at_progress(predictedProgress, _rmpcc.tangentStep);
+            referenceTangent(predictedProgress);
         const Eigen::Vector<double,TWIST_DIM> errorTangent =
             rmpcc_error_coordinate_path_tangent(
                 linearization.nominalNext.head<TWIST_DIM>(), stageReferenceTangent);
@@ -1055,8 +1138,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                     lagProjection * errorOffset.segment<TWIST_DIM>(row);
             }
         }
+        residualHessianTime += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - residualStart).count();
     }
 
+    const auto finalAssemblyStart = std::chrono::steady_clock::now();
     MatrixXd H = 2.0 * errorSensitivity.transpose() * Q * errorSensitivity
                  + fullResidualH;
     VectorXd f = 2.0 * errorSensitivity.transpose() * Q * errorOffset
@@ -1068,7 +1154,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const int sOffset = progressOffset + stage;
         const RmpccStateVector &stageState = nominalStates[static_cast<size_t>(stage)];
         const Eigen::Vector<double,TWIST_DIM> tangent =
-            _trajectory.tangent_at_progress(stageState(6), _rmpcc.tangentStep);
+            referenceTangent(stageState(6));
         const Eigen::Vector<double,TWIST_DIM> transportedTangent =
             rmpcc_transport_reference_tangent(
                 stageState.head<TWIST_DIM>(), tangent);
@@ -1124,6 +1210,26 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
 
     H += _rmpcc.hessianRegularization * MatrixXd::Identity(variableDim, variableDim);
     H = 0.5 * (H + H.transpose());
+    if(numericalAudit)
+    {
+        std::uint64_t residualHash = 1469598103934665603ULL;
+        hash_eigen(residualHash, errorSensitivity);
+        hash_eigen(residualHash, errorOffset);
+        hash_eigen(residualHash, contourResidualSensitivity);
+        hash_eigen(residualHash, contourResidualOffset);
+        hash_eigen(residualHash, lagResidualSensitivity);
+        hash_eigen(residualHash, lagResidualOffset);
+        hash_eigen(residualHash, scalarLagResidualSensitivity);
+        hash_eigen(residualHash, scalarLagResidualOffset);
+        _diagnostics.stateLinearizationHash = stateLinearizationHash;
+        _diagnostics.residualLinearizationHash = residualHash;
+        std::uint64_t hessianHash = 1469598103934665603ULL;
+        hash_eigen(hessianHash, H);
+        hash_eigen(hessianHash, f);
+        _diagnostics.hessianHash = hessianHash;
+    }
+    residualHessianTime += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - finalAssemblyStart).count();
 
     const auto solveStart = std::chrono::steady_clock::now();
     VectorXd zOpt = _fixedProgressSchedule
@@ -1353,6 +1459,16 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         _diagnostics.runningPathVelocityCost +=
             (residual.transpose() * pathVelocityWeight * residual)(0);
     }
+    _diagnostics.referencePoseQueryTimeSeconds = referencePoseQueryTime;
+    _diagnostics.referenceTangentQueryTimeSeconds = referenceTangentQueryTime;
+    _diagnostics.referencePoseQueryCount = referencePoseQueryCount;
+    _diagnostics.referenceTangentQueryCount = referenceTangentQueryCount;
+    _diagnostics.referencePoseRequestCount = referencePoseRequestCount;
+    _diagnostics.referenceTangentRequestCount = referenceTangentRequestCount;
+    _diagnostics.stageRolloutLinearizationTimeSeconds = rolloutLinearizationTime;
+    _diagnostics.residualHessianAssemblyTimeSeconds = residualHessianTime;
+    _diagnostics.totalSolveTimeSeconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - totalSolveStart).count();
 }
 
 Eigen::VectorXd
