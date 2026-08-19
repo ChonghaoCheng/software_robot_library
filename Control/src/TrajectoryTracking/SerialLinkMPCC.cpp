@@ -118,6 +118,18 @@ SerialLinkMPCC::set_angular_velocity_limit(const double angularVelocityMax)
 }
 
 void
+SerialLinkMPCC::set_linear_velocity_limit(const double linearVelocityMax)
+{
+    if(not std::isfinite(linearVelocityMax) or linearVelocityMax <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] set_linear_velocity_limit(): "
+            "Limit must be finite and positive.");
+    }
+    _vMaxLinear = linearVelocityMax;
+}
+
+void
 SerialLinkMPCC::set_trajectory_frame(
     const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame)
 {

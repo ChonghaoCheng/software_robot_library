@@ -164,12 +164,22 @@ int main()
             model, "tool", SerialLinkParameters{});
         failures += controller.linear_velocity_limit() != 0.2;
         failures += controller.angular_velocity_limit() != 0.2;
+        controller.set_linear_velocity_limit(0.5);
         controller.set_angular_velocity_limit(0.5);
+        failures += controller.linear_velocity_limit() != 0.5;
         failures += controller.angular_velocity_limit() != 0.5;
         for(const double invalidLimit :
             {0.0, -0.5, std::numeric_limits<double>::infinity(),
              std::numeric_limits<double>::quiet_NaN()})
         {
+            try
+            {
+                controller.set_linear_velocity_limit(invalidLimit);
+                ++failures;
+            }
+            catch(const std::invalid_argument &)
+            {
+            }
             try
             {
                 controller.set_angular_velocity_limit(invalidLimit);

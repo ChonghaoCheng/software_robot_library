@@ -114,6 +114,15 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         void
         set_angular_velocity_limit(double angularVelocityMax);
 
+        /**
+         * @brief Set the Cartesian linear-velocity bound used by the MPCC QP.
+         *
+         * This is an explicit experiment/profile override. The production
+         * default remains 0.2 m/s.
+         */
+        void
+        set_linear_velocity_limit(double linearVelocityMax);
+
         /** Cartesian linear-velocity bound used by the MPCC QP. */
         double
         linear_velocity_limit() const { return _vMaxLinear; }
