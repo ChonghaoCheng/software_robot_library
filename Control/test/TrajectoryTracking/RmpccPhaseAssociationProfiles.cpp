@@ -4,6 +4,7 @@
  */
 
 #include <Control/TrajectoryTracking/SerialLinkRMPCC.h>
+#include <Control/TrajectoryTracking/SerialLinkMPCC.h>
 #include <Model/KinematicTree.h>
 
 #include <Eigen/Core>
@@ -158,6 +159,27 @@ int main()
     model->update_state(Eigen::VectorXd::Zero(1), Eigen::VectorXd::Zero(1));
 
     int failures = 0;
+    {
+        RobotLibrary::Control::SerialLinkMPCC controller(
+            model, "tool", SerialLinkParameters{});
+        failures += controller.linear_velocity_limit() != 0.2;
+        failures += controller.angular_velocity_limit() != 0.2;
+        controller.set_angular_velocity_limit(0.5);
+        failures += controller.angular_velocity_limit() != 0.5;
+        for(const double invalidLimit :
+            {0.0, -0.5, std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::quiet_NaN()})
+        {
+            try
+            {
+                controller.set_angular_velocity_limit(invalidLimit);
+                ++failures;
+            }
+            catch(const std::invalid_argument &)
+            {
+            }
+        }
+    }
     failures += not accepts(
         model, local_unified(RmpccPhaseAssociation::TaskPoseFeature),
         "TaskPoseFeature + LocalUnified");

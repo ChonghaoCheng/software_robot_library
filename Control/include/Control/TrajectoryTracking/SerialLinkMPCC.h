@@ -105,6 +105,23 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         void
         set_fixed_progress_schedule(bool enabled) { _fixedProgressSchedule = enabled; }
 
+        /**
+         * @brief Set the Cartesian angular-velocity bound used by the MPCC QP.
+         *
+         * This is an explicit experiment/profile override. The production
+         * default remains 0.2 rad/s.
+         */
+        void
+        set_angular_velocity_limit(double angularVelocityMax);
+
+        /** Cartesian linear-velocity bound used by the MPCC QP. */
+        double
+        linear_velocity_limit() const { return _vMaxLinear; }
+
+        /** Cartesian angular-velocity bound used by the MPCC QP. */
+        double
+        angular_velocity_limit() const { return _vMaxAngular; }
+
         /** Set the rigid trajectory parent pose/twist in the robot base frame. */
         void
         set_trajectory_frame(

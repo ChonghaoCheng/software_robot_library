@@ -106,6 +106,18 @@ SerialLinkMPCC::set_ablation_profile(const MpccAblationProfile profile)
 }
 
 void
+SerialLinkMPCC::set_angular_velocity_limit(const double angularVelocityMax)
+{
+    if(not std::isfinite(angularVelocityMax) or angularVelocityMax <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] set_angular_velocity_limit(): "
+            "Limit must be finite and positive.");
+    }
+    _vMaxAngular = angularVelocityMax;
+}
+
+void
 SerialLinkMPCC::set_trajectory_frame(
     const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame)
 {
