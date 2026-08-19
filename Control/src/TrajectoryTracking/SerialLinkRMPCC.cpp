@@ -1530,6 +1530,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.parentFrameMotionActive = parentMotionActive;
     _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
     _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
+    _diagnostics.parentMeasurementTimeSeconds = _parentFrameMotion.current_time();
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
     const Eigen::Matrix4d firstPathPose = referenceTransform(_pathProgress);

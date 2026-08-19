@@ -93,6 +93,8 @@ class CausalParentFrameMotion
 
         const Eigen::Matrix4d &current_pose() const { return _current; }
 
+        double current_time() const { return _currentTime; }
+
         Eigen::Matrix4d predicted_pose(const int stage, const double dt) const
         {
             if(stage < 0 or not std::isfinite(dt) or dt <= 0.0)

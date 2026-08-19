@@ -232,6 +232,7 @@ struct RmpccDiagnostics
     Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
+    double parentMeasurementTimeSeconds = 0.0;
 };
 
 /**

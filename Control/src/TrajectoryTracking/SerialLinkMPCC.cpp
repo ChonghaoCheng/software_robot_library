@@ -265,8 +265,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             const Eigen::Vector<double,6> bodyTangent =
                 _trajectory.tangent_at_progress(progress);
             const Eigen::Matrix3d stageRotation =
-                _trajectoryFrame.transformInBase.block<3,3>(0,0)
-                * pathPose.block<3,3>(0,0);
+                mpcc_stage_reference_rotation(parentTransform(stage), pathPose);
             const auto mappedMotion = [&](const double candidateRate)
             {
                 const Eigen::Matrix4d displacement =
@@ -546,6 +545,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.parentFrameMotionActive = parentMotionActive;
     _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
     _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
+    _diagnostics.parentMeasurementTimeSeconds = _parentFrameMotion.current_time();
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
     const Eigen::Matrix4d firstPathPose =

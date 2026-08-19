@@ -40,6 +40,15 @@ mpcc_express_body_tangent_in_prediction_frame(
     return result;
 }
 
+inline Eigen::Matrix3d
+mpcc_stage_reference_rotation(
+    const Eigen::Matrix4d &predictedParentTransform,
+    const Eigen::Matrix4d &pathPose)
+{
+    return predictedParentTransform.block<3,3>(0,0)
+        * pathPose.block<3,3>(0,0);
+}
+
 enum class MpccAblationProfile
 {
     Baseline,
@@ -71,6 +80,7 @@ struct MpccDiagnostics
     Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
+    double parentMeasurementTimeSeconds = 0.0;
 };
 
 class SerialLinkMPCC : public SerialLinkVelocityBase
