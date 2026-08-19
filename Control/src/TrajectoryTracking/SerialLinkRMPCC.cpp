@@ -495,6 +495,17 @@ SerialLinkRMPCC::set_trajectory_frame(
 {
     RobotLibrary::Trajectory::validate_trajectory_frame(frame);
     _trajectoryFrame = frame;
+    _parentFrameMotion.set_static_pose(active_frame_transform_in_base());
+}
+
+void
+SerialLinkRMPCC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+    const double timestampSeconds)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
+    _parentFrameMotion.update(active_frame_transform_in_base(), timestampSeconds);
 }
 
 void
@@ -520,6 +531,7 @@ SerialLinkRMPCC::reset()
     _warmStart.resize(0);
     _controlStepIndex = 0;
     _scheduleProgressLimit = 1.0;
+    _parentFrameMotion.reset();
     _diagnostics = RmpccDiagnostics();
 }
 
@@ -654,6 +666,14 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         ++referenceTangentQueryCount;
         return value;
     };
+    const bool parentMotionActive = _parentFrameMotion.has_velocity()
+        && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
+    const bool parentRepairActive = parentMotionActive
+        && _rmpcc.referenceMotion == RmpccReferenceMotion::LegacyTangentProduct;
+    const auto parentTransform = [&](const int stage)
+    {
+        return _parentFrameMotion.predicted_pose(stage, dt);
+    };
 
     _diagnostics.qpStatus = 0.0;
     _diagnostics.fallbackUsed = false;
@@ -786,15 +806,29 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         std::chrono::duration<double>(
             std::chrono::steady_clock::now() - constraintStart).count();
     const auto propagate = [&](const RmpccStateVector &state,
-                               const RmpccInputVector &input)
+                               const RmpccInputVector &input,
+                               const int stage)
     {
+        if(parentRepairActive)
+        {
+            return rmpcc_parent_repaired_legacy_state_step(
+                state, input, dt, stage,
+                referenceTransform, referenceTangent, parentTransform);
+        }
         return _rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3
             ? rmpcc_exact_state_step(state, input, dt, referenceTransform)
             : rmpcc_additive_state_step(state, input, dt, referenceTangent);
     };
     const auto linearize = [&](const RmpccStateVector &state,
-                               const RmpccInputVector &input)
+                               const RmpccInputVector &input,
+                               const int stage)
     {
+        if(parentRepairActive)
+        {
+            return rmpcc_linearize_parent_repaired_legacy_state_step(
+                state, input, dt, stage, _rmpcc.rtiFiniteDifferenceStep,
+                referenceTransform, referenceTangent, parentTransform);
+        }
         return _rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3
             ? rmpcc_linearize_exact_state_step(
                   state, input, dt, _rmpcc.rtiFiniteDifferenceStep,
@@ -819,7 +853,13 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             const double rate = clamp_value(_rmpcc.progressRateRef,
                                             lower(sOffset), upper(sOffset));
             Eigen::Vector<double,TWIST_DIM> bodyTwist;
-            if(_rmpcc.referenceMotion
+            if(parentRepairActive)
+            {
+                bodyTwist = rmpcc_parent_repaired_legacy_feedforward(
+                    guessState.head<TWIST_DIM>(), guessState(6), rate, dt, stage,
+                    referenceTransform, referenceTangent, parentTransform);
+            }
+            else if(_rmpcc.referenceMotion
                == RmpccReferenceMotion::StageConsistent)
             {
                 bodyTwist = rmpcc_stage_consistent_feedforward(
@@ -852,7 +892,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             guessInput(6) = rate;
             const Eigen::Matrix4d previousRelative =
                 RobotLibrary::Math::se3_exponential(guessState.head<TWIST_DIM>());
-            const RmpccStateVector nextGuessState = propagate(guessState, guessInput);
+            const RmpccStateVector nextGuessState =
+                propagate(guessState, guessInput, stage);
             const Eigen::Matrix4d nextRelative =
                 RobotLibrary::Math::se3_exponential(nextGuessState.head<TWIST_DIM>());
             _diagnostics.warmStartInvariantError = std::max(
@@ -916,7 +957,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
 
         const auto rolloutStart = std::chrono::steady_clock::now();
         const RmpccStageLinearization linearization = linearize(
-            nominalStates[static_cast<size_t>(stage)], nominalInput);
+            nominalStates[static_cast<size_t>(stage)], nominalInput, stage);
         if(numericalAudit)
         {
             hash_eigen(stateLinearizationHash, linearization.nominalNext);
@@ -1220,14 +1261,20 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const RmpccStateVector &stageState = nominalStates[static_cast<size_t>(stage)];
         const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
             _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
-        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent)
+        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+           || parentRepairActive)
         {
             H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
                 2.0 * _rmpcc.controlWeight;
             const RmpccPathVelocityResidualLinearization residualLinearization =
-                rmpcc_linearize_stage_consistent_path_velocity_residual(
-                    stageState, nominalInputs[static_cast<size_t>(stage)], dt,
-                    _rmpcc.rtiFiniteDifferenceStep, referenceTransform);
+                parentRepairActive
+                ? rmpcc_linearize_parent_repaired_legacy_path_velocity_residual(
+                      stageState, nominalInputs[static_cast<size_t>(stage)], dt,
+                      stage, _rmpcc.rtiFiniteDifferenceStep,
+                      referenceTransform, referenceTangent, parentTransform)
+                : rmpcc_linearize_stage_consistent_path_velocity_residual(
+                      stageState, nominalInputs[static_cast<size_t>(stage)], dt,
+                      _rmpcc.rtiFiniteDifferenceStep, referenceTransform);
             MatrixXd residualJacobian = residualLinearization.stateJacobian
                 * stageStartStateSensitivities[static_cast<size_t>(stage)];
             residualJacobian.block<TWIST_DIM,TWIST_DIM>(0, uOffset) +=
@@ -1394,7 +1441,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.referenceLinearSpeed = (currentTau * _rmpcc.progressRateRef).head<3>().norm();
     _diagnostics.referenceAngularSpeed = (currentTau * _rmpcc.progressRateRef).tail<3>().norm();
     _diagnostics.feedforwardBodyTwist =
-        _rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+        parentRepairActive
+        ? rmpcc_parent_repaired_legacy_feedforward(
+              e0, _pathProgress, _diagnostics.progressRate, dt, 0,
+              referenceTransform, referenceTangent, parentTransform)
+        : _rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
         ? rmpcc_stage_consistent_feedforward(
               e0, _pathProgress, _diagnostics.progressRate, dt,
               referenceTransform)
@@ -1476,6 +1527,18 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         currentPhaseResidual.vectorLag.head<3>().norm();
     _diagnostics.vectorLagRotationNorm =
         currentPhaseResidual.vectorLag.tail<3>().norm();
+    _diagnostics.parentFrameMotionActive = parentMotionActive;
+    _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
+    _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
+    _diagnostics.predictedParentPoseFirst = parentTransform(1);
+    _diagnostics.predictedParentPoseHorizon = parentTransform(N);
+    const Eigen::Matrix4d firstPathPose = referenceTransform(_pathProgress);
+    _diagnostics.parentReferenceFactorFirst = parent_frame_reference_factor(
+        firstPathPose, parentTransform(0), parentTransform(1));
+    _diagnostics.repairedReferenceDisplacementFirst =
+        legacy_repaired_reference_displacement(
+            firstPathPose, currentTau, _diagnostics.progressRate, dt,
+            parentTransform(0), parentTransform(1));
 
     _diagnostics.runningContourCost = 0.0;
     _diagnostics.runningLagCost = 0.0;
@@ -1555,7 +1618,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         }
 
         Eigen::Vector<double,TWIST_DIM> residual;
-        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent)
+        if(_rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
+           || parentRepairActive)
         {
             residual = predictedPathVelocityResiduals.segment<TWIST_DIM>(row);
         }
@@ -1648,7 +1712,24 @@ SerialLinkRMPCC::step(const double dt)
     {
         return reference_transform_in_trajectory_frame(progress);
     };
-    if(_rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3)
+    const bool parentMotionActive = _parentFrameMotion.has_velocity()
+        && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
+    if(parentMotionActive
+       && _rmpcc.referenceMotion == RmpccReferenceMotion::LegacyTangentProduct)
+    {
+        const auto referenceTangent = [this](const double progress)
+        {
+            return _trajectory.tangent_at_progress(progress, _rmpcc.tangentStep);
+        };
+        const auto parentTransform = [this, dt](const int stage)
+        {
+            return _parentFrameMotion.predicted_pose(stage, dt);
+        };
+        _predictedNextError = rmpcc_parent_repaired_legacy_state_step(
+            realizedState, realizedInput, dt, 0,
+            referenceTransform, referenceTangent, parentTransform).head<TWIST_DIM>();
+    }
+    else if(_rmpcc.predictorGeometry == RmpccPredictorGeometry::ExactSE3)
     {
         _predictedNextError =
             rmpcc_exact_state_step(realizedState, realizedInput, dt,

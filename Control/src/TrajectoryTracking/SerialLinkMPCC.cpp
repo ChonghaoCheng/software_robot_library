@@ -68,6 +68,7 @@ SerialLinkMPCC::set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &
     _pathProgress = 0.0;
     _uLast.setZero();
     _warmStart.resize(0);
+    _parentFrameMotion.reset();
     _diagnostics = MpccDiagnostics();
     _vProgressNominal = 1.0 / duration;
     _vProgressMin = (_ablationProfile == MpccAblationProfile::Baseline
@@ -135,6 +136,17 @@ SerialLinkMPCC::set_trajectory_frame(
 {
     RobotLibrary::Trajectory::validate_trajectory_frame(frame);
     _trajectoryFrame = frame;
+    _parentFrameMotion.set_static_pose(frame.transformInBase);
+}
+
+void
+SerialLinkMPCC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+    const double timestampSeconds)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
+    _parentFrameMotion.update(frame.transformInBase, timestampSeconds);
 }
 
 Eigen::VectorXd
@@ -218,6 +230,18 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         _pathProgress, N, _dt, 1.0 / _vProgressNominal);
 
     std::vector<Eigen::Vector<double,ERROR_DIM>> pathTangents(static_cast<size_t>(N));
+    std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotionJacobians(
+        static_cast<size_t>(N));
+    std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotionOffsets(
+        static_cast<size_t>(N), Eigen::Vector<double,ERROR_DIM>::Zero());
+    std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotions(
+        static_cast<size_t>(N));
+    const bool parentMotionActive = _parentFrameMotion.has_velocity()
+        && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
+    const auto parentTransform = [&](const int stage)
+    {
+        return _parentFrameMotion.predicted_pose(stage, _dt);
+    };
     double progress = _pathProgress;
     for(int stage = 0; stage < N; ++stage)
     {
@@ -228,6 +252,40 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         if(not _fixedProgressSchedule and _warmStart.size() == controlDim)
         {
             rate = _warmStart(stage * NU + 6);
+        }
+        referenceMotionJacobians[static_cast<size_t>(stage)] =
+            pathTangents[static_cast<size_t>(stage)];
+        referenceMotions[static_cast<size_t>(stage)] =
+            pathTangents[static_cast<size_t>(stage)] * rate;
+        if(parentMotionActive)
+        {
+            RobotLibrary::Model::Pose pathPoseModel =
+                _trajectory.pose_at_progress(progress);
+            const Eigen::Matrix4d pathPose = pathPoseModel.as_matrix();
+            const Eigen::Vector<double,6> bodyTangent =
+                _trajectory.tangent_at_progress(progress);
+            const Eigen::Matrix3d stageRotation =
+                _trajectoryFrame.transformInBase.block<3,3>(0,0)
+                * pathPose.block<3,3>(0,0);
+            const auto mappedMotion = [&](const double candidateRate)
+            {
+                const Eigen::Matrix4d displacement =
+                    legacy_repaired_reference_displacement(
+                        pathPose, bodyTangent, candidateRate, _dt,
+                        parentTransform(stage), parentTransform(stage + 1));
+                return mpcc_express_body_tangent_in_prediction_frame(
+                    RobotLibrary::Math::se3_logarithm(displacement) / _dt,
+                    stageRotation, referenceRotation);
+            };
+            constexpr double rateStep = 1e-6;
+            const Eigen::Vector<double,ERROR_DIM> motion = mappedMotion(rate);
+            const Eigen::Vector<double,ERROR_DIM> derivative =
+                (mappedMotion(rate + rateStep) - mappedMotion(rate - rateStep))
+                / (2.0 * rateStep);
+            referenceMotions[static_cast<size_t>(stage)] = motion;
+            referenceMotionJacobians[static_cast<size_t>(stage)] = derivative;
+            referenceMotionOffsets[static_cast<size_t>(stage)] =
+                motion - derivative * rate;
         }
         progress = std::clamp(progress + _dt * (_fixedProgressSchedule
                                   ? rate
@@ -284,7 +342,9 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             errorResponse.block<ERROR_DIM,ERROR_DIM>(row, column) +=
                 _dt * Eigen::Matrix<double,ERROR_DIM,ERROR_DIM>::Identity();
             errorResponse.block<ERROR_DIM,1>(row, column + 6) +=
-                -_dt * pathTangents[static_cast<size_t>(input)];
+                -_dt * referenceMotionJacobians[static_cast<size_t>(input)];
+            errorOffset.segment<ERROR_DIM>(row) -=
+                _dt * referenceMotionOffsets[static_cast<size_t>(input)];
         }
     }
 
@@ -334,6 +394,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
 
     VectorXd nominalControl = VectorXd::Zero(controlDim);
     MatrixXd pathVelocityResponse = MatrixXd::Zero(errorDim, controlDim);
+    VectorXd pathVelocityOffset = VectorXd::Zero(errorDim);
     const double nominalSeedRate =
         std::min(_vProgressNominal,
                  remaining / std::max(static_cast<double>(N) * _dt, 1e-9));
@@ -344,11 +405,15 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         const double stageSeedRate = _fixedProgressSchedule
             ? fixedProgressRates(stage) : nominalSeedRate;
         nominalControl.segment<ERROR_DIM>(offset) =
-            pathTangents[static_cast<size_t>(stage)] * stageSeedRate;
+            parentMotionActive
+            ? referenceMotions[static_cast<size_t>(stage)]
+            : pathTangents[static_cast<size_t>(stage)] * stageSeedRate;
         nominalControl(offset + 6) = stageSeedRate;
         pathVelocityResponse.block<ERROR_DIM,ERROR_DIM>(row, offset).setIdentity();
         pathVelocityResponse.block<ERROR_DIM,1>(row, offset + 6) =
-            -pathTangents[static_cast<size_t>(stage)];
+            -referenceMotionJacobians[static_cast<size_t>(stage)];
+        pathVelocityOffset.segment<ERROR_DIM>(row) =
+            -referenceMotionOffsets[static_cast<size_t>(stage)];
     }
 
     MatrixXd difference = MatrixXd::Zero(controlDim, controlDim);
@@ -376,6 +441,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
 
     VectorXd f =
         errorResponse.transpose() * errorWeight * errorOffset
+        + pathVelocityResponse.transpose() * pathVelocityWeightHorizon
+            * pathVelocityOffset
         - difference.transpose() * deltaWeight * deltaReference;
     const double progressReward = optimizedProgress ? 0.2 : _qProgressReward;
     for(int stage = 0; stage < N; ++stage)
@@ -476,6 +543,20 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             std::clamp(firstControl(i + 3), -_vMaxAngular, _vMaxAngular);
     }
     firstControl(6) = std::clamp(firstControl(6), lower(6), upper(6));
+    _diagnostics.parentFrameMotionActive = parentMotionActive;
+    _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
+    _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
+    _diagnostics.predictedParentPoseFirst = parentTransform(1);
+    _diagnostics.predictedParentPoseHorizon = parentTransform(N);
+    const Eigen::Matrix4d firstPathPose =
+        _trajectory.pose_at_progress(_pathProgress).as_matrix();
+    _diagnostics.parentReferenceFactorFirst = parent_frame_reference_factor(
+        firstPathPose, parentTransform(0), parentTransform(1));
+    _diagnostics.repairedReferenceDisplacementFirst =
+        legacy_repaired_reference_displacement(
+            firstPathPose,
+            _trajectory.tangent_at_progress(_pathProgress),
+            firstControl(6), _dt, parentTransform(0), parentTransform(1));
     return firstControl;
 }
 

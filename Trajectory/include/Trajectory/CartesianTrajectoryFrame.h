@@ -12,6 +12,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace RobotLibrary { namespace Trajectory {
@@ -26,6 +27,8 @@ struct CartesianTrajectoryFrameState
 {
     Eigen::Matrix4d transformInBase = Eigen::Matrix4d::Identity();
     Eigen::Vector<double,6> twistInBase = Eigen::Vector<double,6>::Zero();
+    /** Source measurement timestamp; NaN when the producer has no clock stamp. */
+    double measurementTimeSeconds = std::numeric_limits<double>::quiet_NaN();
 };
 
 inline void

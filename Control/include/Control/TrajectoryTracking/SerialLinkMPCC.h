@@ -16,6 +16,7 @@
 #define SERIAL_LINK_MPCC_H
 
 #include <Control/Core/SerialLinkVelocityBase.h>
+#include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
 #include <Trajectory/CartesianSpline.h>
 #include <Trajectory/CartesianTrajectoryFrame.h>
 
@@ -63,6 +64,13 @@ struct MpccDiagnostics
     double qpFinalStepSize = 0.0;
     double qpObjective = 0.0;
     double twistRealizationError = 0.0;
+    bool parentFrameMotionActive = false;
+    Eigen::Vector<double,6> parentFrameBodyTwist = Eigen::Vector<double,6>::Zero();
+    Eigen::Matrix4d measuredParentPose = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseFirst = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
 };
 
 class SerialLinkMPCC : public SerialLinkVelocityBase
@@ -136,6 +144,12 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         set_trajectory_frame(
             const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame);
 
+        /** Set a timestamped parent-frame measurement for causal prediction. */
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+            double timestampSeconds);
+
         /** Run one MPCC step using internally integrated virtual progress. */
         Eigen::VectorXd
         step(double dt);
@@ -207,6 +221,7 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
 
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
         RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
+        CausalParentFrameMotion _parentFrameMotion;
         bool _trajectorySet = false;
 
         // Controller-owned progress; future progress is predicted inside the QP.

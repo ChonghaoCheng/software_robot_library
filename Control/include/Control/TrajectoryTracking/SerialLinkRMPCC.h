@@ -34,6 +34,7 @@
 #define SERIAL_LINK_RMPCC_H
 
 #include <Control/Core/SerialLinkVelocityBase.h>
+#include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
 #include <Control/TrajectoryTracking/RmpccTypes.h>
 #include <Trajectory/CartesianSpline.h>
 #include <Trajectory/CartesianTrajectoryFrame.h>
@@ -224,6 +225,13 @@ struct RmpccDiagnostics
     double externalAngularSaturationActive = 0.0;
     double qpStatus              = 1.0;  ///< 1 for a completed step; solver failures throw
     bool   fallbackUsed          = false;///< Compatibility field; strict RMPCC never executes a fallback
+    bool parentFrameMotionActive = false;
+    Eigen::Vector<double,6> parentFrameBodyTwist = Eigen::Vector<double,6>::Zero();
+    Eigen::Matrix4d measuredParentPose = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseFirst = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
 };
 
 /**
@@ -265,6 +273,12 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         void
         set_trajectory_frame(
             const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame);
+
+        /** Set a timestamped parent-frame measurement for causal prediction. */
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+            double timestampSeconds);
 
         /**
          * @brief Compatibility-only rigid pre-transform D. Default identity.
@@ -335,6 +349,7 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         std::shared_ptr<RmpccPoseArcTable> _poseArcTable;
 
         RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
+        CausalParentFrameMotion _parentFrameMotion;
         Eigen::Matrix4d _disturbance = Eigen::Matrix4d::Identity();
         double _scheduleProgressLimit = 1.0;
         bool _fixedProgressSchedule = false;

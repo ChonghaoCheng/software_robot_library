@@ -8,6 +8,8 @@
 
 #include "RmpccPrediction.h"
 
+#include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
+
 #include <Math/MathFunctions.h>
 
 #include <Eigen/Core>
@@ -25,6 +27,229 @@ struct RmpccPathVelocityResidualLinearization
     Eigen::Matrix<double,6,7> stateJacobian = Eigen::Matrix<double,6,7>::Zero();
     Eigen::Matrix<double,6,7> inputJacobian = Eigen::Matrix<double,6,7>::Zero();
 };
+
+/** Legacy tangent-product path motion with a causal moving-parent factor. */
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+Eigen::Matrix4d
+rmpcc_parent_repaired_legacy_displacement(
+    const double progress,
+    const double progressRate,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    auto &&reference = referenceTransform;
+    auto &&tangent = referenceTangent;
+    auto &&parent = parentTransform;
+    const double s = std::clamp(progress, 0.0, 1.0);
+    return legacy_repaired_reference_displacement(
+        reference(s), tangent(s), progressRate, dt,
+        parent(stage), parent(stage + 1));
+}
+
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+RmpccStateVector
+rmpcc_parent_repaired_legacy_state_step(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    const Eigen::Matrix4d displacement =
+        rmpcc_parent_repaired_legacy_displacement(
+            state(6), input(6), dt, stage,
+            std::forward<ReferenceTransformFunction>(referenceTransform),
+            std::forward<ReferenceTangentFunction>(referenceTangent),
+            std::forward<ParentTransformFunction>(parentTransform));
+    const Eigen::Matrix4d relative =
+        RobotLibrary::Math::se3_exponential(state.head<6>());
+    RmpccStateVector next;
+    next.head<6>() = RobotLibrary::Math::se3_logarithm(
+        RobotLibrary::Math::se3_inverse(displacement)
+        * relative * RobotLibrary::Math::se3_exponential(dt * input.head<6>()));
+    next(6) = std::clamp(state(6) + dt * input(6), 0.0, 1.0);
+    return next;
+}
+
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+RmpccStageLinearization
+rmpcc_linearize_parent_repaired_legacy_state_step(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    const double finiteDifferenceStep,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    auto &&reference = referenceTransform;
+    auto &&tangent = referenceTangent;
+    auto &&parent = parentTransform;
+    const auto evaluate = [&](const RmpccStateVector &x, const RmpccInputVector &u)
+    {
+        return rmpcc_parent_repaired_legacy_state_step(
+            x, u, dt, stage, reference, tangent, parent);
+    };
+
+    RmpccStageLinearization result;
+    result.nominalNext = evaluate(state, input);
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccStateVector plus = state;
+        RmpccStateVector minus = state;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        if(column == 6)
+        {
+            plus(6) = std::clamp(plus(6), 0.0, 1.0);
+            minus(6) = std::clamp(minus(6), 0.0, 1.0);
+        }
+        const double denominator = plus(column) - minus(column);
+        if(std::abs(denominator) > 1e-15)
+        {
+            result.stateJacobian.col(column) =
+                (evaluate(plus, input) - evaluate(minus, input)) / denominator;
+        }
+    }
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccInputVector plus = input;
+        RmpccInputVector minus = input;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        double denominator = 2.0 * finiteDifferenceStep;
+        if(column == 6)
+        {
+            const auto perturbations = rmpcc_progress_rate_perturbations(
+                state(6), input(6), dt, finiteDifferenceStep);
+            minus(6) = perturbations.first;
+            plus(6) = perturbations.second;
+            denominator = plus(6) - minus(6);
+        }
+        if(std::abs(denominator) > 1e-15)
+        {
+            result.inputJacobian.col(column) =
+                (evaluate(state, plus) - evaluate(state, minus)) / denominator;
+        }
+    }
+    return result;
+}
+
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+Eigen::Vector<double,6>
+rmpcc_parent_repaired_legacy_feedforward(
+    const Eigen::Vector<double,6> &error,
+    const double progress,
+    const double progressRate,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    const Eigen::Matrix4d displacement =
+        rmpcc_parent_repaired_legacy_displacement(
+            progress, progressRate, dt, stage,
+            std::forward<ReferenceTransformFunction>(referenceTransform),
+            std::forward<ReferenceTangentFunction>(referenceTangent),
+            std::forward<ParentTransformFunction>(parentTransform));
+    return RobotLibrary::Math::adjoint(
+               RobotLibrary::Math::se3_inverse(
+                   RobotLibrary::Math::se3_exponential(error)))
+           * (RobotLibrary::Math::se3_logarithm(displacement) / dt);
+}
+
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+Eigen::Vector<double,6>
+rmpcc_parent_repaired_legacy_path_velocity_residual(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    return input.head<6>() - rmpcc_parent_repaired_legacy_feedforward(
+        state.head<6>(), state(6), input(6), dt, stage,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ReferenceTangentFunction>(referenceTangent),
+        std::forward<ParentTransformFunction>(parentTransform));
+}
+
+template<typename ReferenceTransformFunction,
+         typename ReferenceTangentFunction,
+         typename ParentTransformFunction>
+RmpccPathVelocityResidualLinearization
+rmpcc_linearize_parent_repaired_legacy_path_velocity_residual(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    const double finiteDifferenceStep,
+    ReferenceTransformFunction &&referenceTransform,
+    ReferenceTangentFunction &&referenceTangent,
+    ParentTransformFunction &&parentTransform)
+{
+    auto &&reference = referenceTransform;
+    auto &&tangent = referenceTangent;
+    auto &&parent = parentTransform;
+    const auto evaluate = [&](const RmpccStateVector &x, const RmpccInputVector &u)
+    {
+        return rmpcc_parent_repaired_legacy_path_velocity_residual(
+            x, u, dt, stage, reference, tangent, parent);
+    };
+    RmpccPathVelocityResidualLinearization result;
+    result.residual = evaluate(state, input);
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccStateVector plus = state;
+        RmpccStateVector minus = state;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        if(column == 6)
+        {
+            plus(6) = std::clamp(plus(6), 0.0, 1.0);
+            minus(6) = std::clamp(minus(6), 0.0, 1.0);
+        }
+        const double denominator = plus(column) - minus(column);
+        if(std::abs(denominator) > 1e-15)
+        {
+            result.stateJacobian.col(column) =
+                (evaluate(plus, input) - evaluate(minus, input)) / denominator;
+        }
+    }
+    result.inputJacobian.leftCols<6>().setIdentity();
+    const auto ratePerturbations = rmpcc_progress_rate_perturbations(
+        state(6), input(6), dt, finiteDifferenceStep);
+    const double rateDenominator = ratePerturbations.second - ratePerturbations.first;
+    if(std::abs(rateDenominator) > 1e-15)
+    {
+        RmpccInputVector plus = input;
+        RmpccInputVector minus = input;
+        plus(6) = ratePerturbations.second;
+        minus(6) = ratePerturbations.first;
+        result.inputJacobian.col(6) =
+            (evaluate(state, plus) - evaluate(state, minus)) / rateDenominator;
+    }
+    return result;
+}
 
 /** Centred body-frame Lie tangent dT/ds, expressed at T(s). */
 template<typename ReferenceTransformFunction>
