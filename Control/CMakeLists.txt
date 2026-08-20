@@ -5,6 +5,7 @@ add_library(Control src/Core/SerialLinkBase.cpp
                     src/TrajectoryTracking/SerialLinkKinematic.cpp
                     src/TrajectoryTracking/SerialLinkMPCC.cpp
                     src/TrajectoryTracking/SerialLinkCartesianMPCC.cpp
+                    src/TrajectoryTracking/SerialLinkTimeIndexedMPC.cpp
                     src/TrajectoryTracking/SerialLinkMPC.cpp
                     src/TrajectoryTracking/SerialLinkLieAlgebraMPC.cpp
                     src/TrajectoryTracking/SerialLinkRMPCC.cpp
@@ -35,6 +36,7 @@ if(BUILD_TESTING)
     add_control_test(rmpcc_prediction_test test/TrajectoryTracking/RmpccPrediction.cpp)
     add_control_test(rmpcc_reference_motion_test test/TrajectoryTracking/RmpccReferenceMotion.cpp)
     add_control_test(lie_algebra_mpc_prediction_test test/TrajectoryTracking/LieAlgebraMPCPrediction.cpp)
+    add_control_test(time_indexed_mpc_diagnostics_test test/TrajectoryTracking/TimeIndexedMpcDiagnostics.cpp)
     add_control_test(cartesian_mpcc_prediction_test test/TrajectoryTracking/CartesianMPCCPrediction.cpp)
     add_control_test(rmpcc_cost_geometry_test test/TrajectoryTracking/RmpccCostGeometry.cpp)
     add_control_test(rmpcc_full_residual_linearization_test test/TrajectoryTracking/RmpccFullResidualLinearization.cpp)

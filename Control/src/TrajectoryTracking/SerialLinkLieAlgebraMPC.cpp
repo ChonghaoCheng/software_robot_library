@@ -10,6 +10,7 @@
 #include <Math/MathFunctions.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 
@@ -115,6 +116,7 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
             endpoint_twist_in_body(reference.pose.rotation(), reference.twist));
     }
 
+    const auto solveStart = std::chrono::steady_clock::now();
     LieAlgebraMPCVector bodyTwist = solve_error_mpc(initialError, referenceBodyTwists);
     for(int i = 0; i < 3; ++i)
         bodyTwist(i) = std::clamp(bodyTwist(i), -_maxLinearSpeed, _maxLinearSpeed);
@@ -123,7 +125,11 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
 
     const LieAlgebraMPCVector baseTwist =
         endpoint_twist_in_base(currentPose.rotation(), bodyTwist);
-    return resolve_endpoint_twist(baseTwist);
+    const Eigen::VectorXd jointCommand = resolve_endpoint_twist(baseTwist);
+    record_time_indexed_diagnostics(
+        baseTwist, bodyTwist, jointCommand, t0, _dt, _maxLinearSpeed, _maxAngularSpeed,
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - solveStart).count());
+    return jointCommand;
 }
 
 Eigen::VectorXd

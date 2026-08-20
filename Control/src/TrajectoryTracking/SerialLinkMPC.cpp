@@ -7,6 +7,7 @@
  * 控制：u = [v; ω]，为末端在基座系下的 twist。
  */
 
+#include <chrono>
 #include <Control/TrajectoryTracking/SerialLinkMPC.h>
 #include <Math/CondensedMPC.h>
 #include <Math/DiscreteIntegratorLQR.h>
@@ -168,6 +169,7 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
          uRefStack.push_back(controlReference.twist);
      }
 
+     const auto solveStart = std::chrono::steady_clock::now();
      Eigen::Matrix<double,6,1> uOpt = solveMPC(x0, xRefStack, uRefStack);
 
      for (int i = 0; i < 3; ++i)
@@ -179,7 +181,13 @@ Eigen::Vector3d shortest_rotation_vector(const Eigen::Quaterniond &from,
          uOpt[i] = std::clamp(uOpt[i], -_maxAngularSpeed, _maxAngularSpeed);
      }
 
-     return resolve_endpoint_twist(uOpt);
+     // Cartesian MPC clamps directly in base axes, so the clamp-frame twist and
+     // the commanded twist are the same vector.
+     const Eigen::VectorXd jointCommand = resolve_endpoint_twist(uOpt);
+     record_time_indexed_diagnostics(
+         uOpt, uOpt, jointCommand, t0, dt, _maxLinearSpeed, _maxAngularSpeed,
+         std::chrono::duration<double>(std::chrono::steady_clock::now() - solveStart).count());
+     return jointCommand;
  }
 
  ///////////////////////////////////////////////////////////////
