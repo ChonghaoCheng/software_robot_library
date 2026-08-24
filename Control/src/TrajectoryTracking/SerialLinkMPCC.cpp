@@ -217,6 +217,21 @@ SerialLinkMPCC::step_at_time(const double controlTimeSeconds, const double dt)
 }
 
 Eigen::VectorXd
+SerialLinkMPCC::step_at_time(
+    const double controlTimeSeconds,
+    const double dt,
+    const double estimatedProgress)
+{
+    if(not std::isfinite(estimatedProgress))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] step_at_time(): estimated progress must be finite.");
+    }
+    _pathProgress = std::clamp(estimatedProgress, 0.0, 1.0);
+    return step_at_time(controlTimeSeconds, dt);
+}
+
+Eigen::VectorXd
 SerialLinkMPCC::step_impl(const double dt, const double parentMeasurementAgeSeconds)
 {
     if(not _trajectorySet)
@@ -249,7 +264,8 @@ SerialLinkMPCC::step_impl(const double dt, const double parentMeasurementAgeSeco
     _diagnostics.orientationError = error0.tail<3>().norm();
 
     const Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION> optimalControl = solve_mpcc(
-        error0, referenceRotation, currentPose.translation(), parentMeasurementAgeSeconds);
+        error0, referenceRotation, currentPose.translation(),
+        currentPose.quaternion().toRotationMatrix(), parentMeasurementAgeSeconds);
     _uLast = optimalControl;
     _diagnostics.bodyTwist = optimalControl.head<6>();
     _diagnostics.progressRate = optimalControl(6);
@@ -292,6 +308,7 @@ Eigen::Vector<double,SerialLinkMPCC::BASE_STAGE_CONTROL_DIMENSION>
 SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                            const Eigen::Matrix3d &referenceRotation,
                            const Eigen::Vector3d &currentToolPositionBase,
+                           const Eigen::Matrix3d &currentToolRotationBase,
                            const double parentMeasurementAgeSeconds)
 {
     using Eigen::MatrixXd;
@@ -665,6 +682,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     extensionContext.dt = _dt;
     extensionContext.predictionRotation = referenceRotation;
     extensionContext.currentToolPositionBase = currentToolPositionBase;
+    extensionContext.currentToolRotationBase = currentToolRotationBase;
     extensionContext.parentTransforms = parentTransforms;
     extensionContext.stageProgress = stageProgress;
     extensionContext.previousWarmStart = _warmStart;
@@ -732,6 +750,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.parentMeasurementAgeSeconds = parentMeasurementAgeSeconds;
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
+    _diagnostics.predictedParentTransforms = parentTransforms;
     const Eigen::Matrix4d firstPathPose =
         _trajectory.pose_at_progress(_pathProgress).as_matrix();
     _diagnostics.parentReferenceFactorFirst = parent_frame_reference_factor(

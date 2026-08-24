@@ -97,6 +97,7 @@ struct MpccDiagnostics
     Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
+    std::vector<Eigen::Matrix4d> predictedParentTransforms;
     double parentMeasurementTimeSeconds = 0.0;
     double parentMeasurementAgeSeconds = 0.0;
     int stageControlDimension = 7;
@@ -113,6 +114,7 @@ struct MpccQpExtensionContext
     double dt = 0.0;
     Eigen::Matrix3d predictionRotation = Eigen::Matrix3d::Identity();
     Eigen::Vector3d currentToolPositionBase = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d currentToolRotationBase = Eigen::Matrix3d::Identity();
     std::vector<Eigen::Matrix4d> parentTransforms;
     std::vector<double> stageProgress;
     Eigen::VectorXd previousWarmStart;
@@ -214,6 +216,10 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         /** Run a step while compensating a timestamped parent-frame sample to control time. */
         Eigen::VectorXd
         step_at_time(double controlTimeSeconds, double dt);
+
+        /** Timestamp-compensated step with an externally supplied initial progress. */
+        Eigen::VectorXd
+        step_at_time(double controlTimeSeconds, double dt, double estimatedProgress);
 
         /**
          * @brief Current internally integrated path progress.
@@ -372,6 +378,7 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                    const Eigen::Matrix3d &referenceRotation,
                    const Eigen::Vector3d &currentToolPositionBase,
+                   const Eigen::Matrix3d &currentToolRotationBase,
                    double parentMeasurementAgeSeconds);
 
         Eigen::VectorXd

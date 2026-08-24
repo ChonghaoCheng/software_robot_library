@@ -14,6 +14,8 @@ add_library(Control src/Core/SerialLinkBase.cpp
                     src/Contact/SerialLinkAdmittanceMPCC.cpp
                     src/Contact/SerialLinkContactAdaptiveMPCC.cpp
                     src/Contact/SerialLinkContactMPCC.cpp
+                    src/Contact/PredictiveContactModel.cpp
+                    src/Contact/SerialLinkPredictiveContactMPCC.cpp
                     src/Contact/SerialLinkGeometricImpedance.cpp
                     src/Contact/SerialLinkImpedance.cpp
                     src/Contact/SerialLinkMovingFrameMPC.cpp
@@ -62,6 +64,7 @@ if(BUILD_TESTING)
     add_control_test(moving_frame_contact_mpc_test test/Contact/MovingFrameContactMpc.cpp)
     add_control_test(contact_mpcc_test test/Contact/ContactMPCC.cpp)
     add_control_test(contact_adaptive_mpcc_test test/Contact/ContactAdaptiveMPCC.cpp)
+    add_control_test(predictive_contact_mpcc_test test/Contact/PredictiveContactMPCC.cpp)
     add_control_test(contact_closed_loop_test test/Contact/ContactClosedLoop.cpp)
 
     # Offline N125-QP diagnostic utility. It is intentionally not a CTest
