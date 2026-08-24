@@ -97,17 +97,26 @@ class CausalParentFrameMotion
 
         Eigen::Matrix4d predicted_pose(const int stage, const double dt) const
         {
-            if(stage < 0 or not std::isfinite(dt) or dt <= 0.0)
+            return predicted_pose_with_age(0.0, stage, dt);
+        }
+
+        /** Predict from a possibly stale measurement to control time and then along the horizon. */
+        Eigen::Matrix4d predicted_pose_with_age(const double measurementAgeSeconds,
+                                                const int stage,
+                                                const double dt) const
+        {
+            if(not std::isfinite(measurementAgeSeconds) or measurementAgeSeconds < 0.0
+               or stage < 0 or not std::isfinite(dt) or dt <= 0.0)
             {
                 throw std::invalid_argument(
-                    "[ERROR] [PARENT FRAME MOTION] Nonnegative stage and positive dt required.");
+                    "[ERROR] [PARENT FRAME MOTION] Nonnegative age/stage and positive dt required.");
             }
             if(not _hasCurrent)
             {
                 return Eigen::Matrix4d::Identity();
             }
             return _current * RobotLibrary::Math::se3_exponential(
-                static_cast<double>(stage) * dt * _bodyTwist);
+                (measurementAgeSeconds + static_cast<double>(stage) * dt) * _bodyTwist);
         }
 
     private:

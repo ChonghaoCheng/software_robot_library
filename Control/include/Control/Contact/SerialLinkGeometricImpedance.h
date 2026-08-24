@@ -4,13 +4,13 @@
  * @date    June 2026
  * @version 1.0.0
  *
- * @brief   Geometric (SE(3)) impedance control with force feedforward / tracking.
+ * @brief   Cartesian impedance with SO(3) logarithmic orientation error and force tracking.
  *
- * @details This controller renders a Cartesian spring-damper in a geometrically
- *          consistent way on SE(3) (cf. Seo et al., "Geometric Impedance Control
- *          on SE(3) for Robotic Manipulators", arXiv:2211.07945) and adds an
- *          end-effector wrench feedforward so it can be used as a *force*
- *          controller, not just an impedance.
+ * @details This controller renders Cartesian translational impedance with a
+ *          geometrically consistent SO(3) logarithmic orientation error, all
+ *          expressed in the robot base frame. It also adds end-effector wrench
+ *          feedforward/tracking. It does not claim to implement the complete
+ *          left-invariant SE(3) law from Seo et al.
  *
  *          The control law (all quantities in the base/world frame, [force; torque]
  *          and [linear; angular] ordering) is:
@@ -38,7 +38,7 @@
 namespace RobotLibrary { namespace Control {
 
 /**
- * @brief Geometric impedance control on SE(3) with wrench feedforward / tracking.
+ * @brief Base-frame Cartesian impedance with SO(3) logarithmic orientation error.
  */
 class SerialLinkGeometricImpedance : public SerialLinkBase
 {

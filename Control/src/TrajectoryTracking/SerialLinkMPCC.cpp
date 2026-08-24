@@ -13,6 +13,7 @@
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -70,6 +71,7 @@ SerialLinkMPCC::set_trajectory(const RobotLibrary::Trajectory::CartesianSpline &
     _warmStart.resize(0);
     _parentFrameMotion.reset();
     _diagnostics = MpccDiagnostics();
+    reset_additional_virtual_state();
     _vProgressNominal = 1.0 / duration;
     _vProgressMin = (_ablationProfile == MpccAblationProfile::Baseline
                      or _ablationProfile == MpccAblationProfile::MatchedFeedbackGain)
@@ -131,6 +133,52 @@ SerialLinkMPCC::set_linear_velocity_limit(const double linearVelocityMax)
 }
 
 void
+SerialLinkMPCC::set_objective_parameters(const MpccObjectiveParameters &parameters)
+{
+    const double values[] = {
+        parameters.contourWeight, parameters.lagWeight,
+        parameters.orientationWeight, parameters.inputLinearWeight,
+        parameters.inputAngularWeight, parameters.inputProgressWeight,
+        parameters.inputDifferenceWeight, parameters.pathVelocityWeight,
+        parameters.progressReward};
+    for(const double value : values)
+    {
+        if(not std::isfinite(value) or value < 0.0)
+        {
+            throw std::invalid_argument(
+                "[ERROR] [SERIAL LINK MPCC] Objective weights must be finite and nonnegative.");
+        }
+    }
+    _wContour = parameters.contourWeight;
+    _wLag = parameters.lagWeight;
+    _wOrientation = parameters.orientationWeight;
+    _wInputLinear = parameters.inputLinearWeight;
+    _wInputAngular = parameters.inputAngularWeight;
+    _wInputProgress = parameters.inputProgressWeight;
+    _wDeltaU = parameters.inputDifferenceWeight;
+    _wVelocityTracking = parameters.pathVelocityWeight;
+    _qProgressReward = parameters.progressReward;
+}
+
+void
+SerialLinkMPCC::set_progress_rate_limits(
+    const double minimum,
+    const double nominal,
+    const double maximum)
+{
+    if(not std::isfinite(minimum) or not std::isfinite(nominal)
+       or not std::isfinite(maximum) or minimum < 0.0
+       or minimum > nominal or nominal > maximum)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] Progress rates must satisfy 0 <= min <= nominal <= max.");
+    }
+    _vProgressMin = minimum;
+    _vProgressNominal = nominal;
+    _vProgressMax = maximum;
+}
+
+void
 SerialLinkMPCC::set_trajectory_frame(
     const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame)
 {
@@ -152,6 +200,25 @@ SerialLinkMPCC::set_trajectory_frame(
 Eigen::VectorXd
 SerialLinkMPCC::step(const double dt)
 {
+    return step_impl(dt, 0.0);
+}
+
+Eigen::VectorXd
+SerialLinkMPCC::step_at_time(const double controlTimeSeconds, const double dt)
+{
+    if(not std::isfinite(controlTimeSeconds))
+    {
+        throw std::invalid_argument(
+            "[ERROR] [SERIAL LINK MPCC] step_at_time(): control time must be finite.");
+    }
+    const double measurementAge = std::max(
+        0.0, controlTimeSeconds - _parentFrameMotion.current_time());
+    return step_impl(dt, measurementAge);
+}
+
+Eigen::VectorXd
+SerialLinkMPCC::step_impl(const double dt, const double parentMeasurementAgeSeconds)
+{
     if(not _trajectorySet)
     {
         throw std::runtime_error(
@@ -165,8 +232,7 @@ SerialLinkMPCC::step(const double dt)
     update();
 
     const RobotLibrary::Model::Pose referencePose =
-        RobotLibrary::Trajectory::express_pose_in_base(
-            _trajectoryFrame, _trajectory.pose_at_progress(_pathProgress));
+        reference_pose_at_progress(_pathProgress);
     const RobotLibrary::Model::Pose currentPose = endpoint_pose();
     const Eigen::Matrix3d referenceRotation = referencePose.quaternion().toRotationMatrix();
 
@@ -182,7 +248,8 @@ SerialLinkMPCC::step(const double dt)
     _diagnostics.positionError = error0.head<3>().norm();
     _diagnostics.orientationError = error0.tail<3>().norm();
 
-    const Eigen::Vector<double,NU> optimalControl = solve_mpcc(error0, referenceRotation);
+    const Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION> optimalControl = solve_mpcc(
+        error0, referenceRotation, currentPose.translation(), parentMeasurementAgeSeconds);
     _uLast = optimalControl;
     _diagnostics.bodyTwist = optimalControl.head<6>();
     _diagnostics.progressRate = optimalControl(6);
@@ -190,16 +257,25 @@ SerialLinkMPCC::step(const double dt)
     Eigen::Vector<double,6> baseTwist;
     baseTwist.head<3>() = referenceRotation * optimalControl.head<3>();
     baseTwist.tail<3>() = referenceRotation * optimalControl.segment<3>(3);
+    baseTwist = postprocess_base_twist(baseTwist, dt);
+    if(not baseTwist.allFinite())
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK MPCC] step(): Cartesian postprocessor returned a non-finite twist.");
+    }
+    _diagnostics.commandedBaseTwist = baseTwist;
     _pathProgress = std::clamp(_pathProgress + dt * optimalControl(6), 0.0, 1.0);
     _diagnostics.nextProgress = _pathProgress;
     const Eigen::VectorXd jointCommand = resolve_endpoint_twist(baseTwist);
     const Eigen::Vector<double,6> realizedBaseTwist = _jacobianMatrix * jointCommand;
+    _diagnostics.realizedBaseTwist = realizedBaseTwist;
     _diagnostics.realizedBodyTwist.head<3>() =
         referenceRotation.transpose() * realizedBaseTwist.head<3>();
     _diagnostics.realizedBodyTwist.tail<3>() =
         referenceRotation.transpose() * realizedBaseTwist.tail<3>();
     _diagnostics.twistRealizationError =
-        (_diagnostics.realizedBodyTwist - _diagnostics.bodyTwist).norm();
+        (realizedBaseTwist - baseTwist).norm();
+    on_twist_resolved(baseTwist, realizedBaseTwist, dt);
     return jointCommand;
 }
 
@@ -212,16 +288,24 @@ SerialLinkMPCC::step(const double dt, const double estimatedProgress)
     return step(dt);
 }
 
-Eigen::Vector<double,SerialLinkMPCC::NU>
+Eigen::Vector<double,SerialLinkMPCC::BASE_STAGE_CONTROL_DIMENSION>
 SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
-                           const Eigen::Matrix3d &referenceRotation)
+                           const Eigen::Matrix3d &referenceRotation,
+                           const Eigen::Vector3d &currentToolPositionBase,
+                           const double parentMeasurementAgeSeconds)
 {
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
 
     const int N = static_cast<int>(_horizon);
     const int errorDim = ERROR_DIM * N;
-    const int controlDim = NU * N;
+    const int stageControlDim = stage_control_dimension();
+    if(stageControlDim < BASE_STAGE_CONTROL_DIMENSION)
+    {
+        throw std::logic_error(
+            "[ERROR] [SERIAL LINK MPCC] stage_control_dimension() must be at least 7.");
+    }
+    const int controlDim = stageControlDim * N;
     const double remaining = std::max(0.0, 1.0 - _pathProgress);
     const double progressMinimum =
         std::min(_vProgressMin,
@@ -236,22 +320,45 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         static_cast<size_t>(N), Eigen::Vector<double,ERROR_DIM>::Zero());
     std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotions(
         static_cast<size_t>(N));
+    std::vector<Eigen::MatrixXd> additionalReferenceTangents(
+        static_cast<size_t>(N));
+    std::vector<double> stageProgress(static_cast<size_t>(N), _pathProgress);
     const bool parentMotionActive = _parentFrameMotion.has_velocity()
         && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
-    const auto parentTransform = [&](const int stage)
+    std::vector<Eigen::Matrix4d> parentTransforms(static_cast<size_t>(N + 1));
+    for(int stage = 0; stage <= N; ++stage)
     {
-        return _parentFrameMotion.predicted_pose(stage, _dt);
+        parentTransforms[static_cast<size_t>(stage)] =
+            _parentFrameMotion.predicted_pose_with_age(
+                parentMeasurementAgeSeconds, stage, _dt);
+    }
+    const auto parentTransform = [&](const int stage) -> const Eigen::Matrix4d &
+    {
+        return parentTransforms[static_cast<size_t>(stage)];
     };
     double progress = _pathProgress;
     for(int stage = 0; stage < N; ++stage)
     {
+        stageProgress[static_cast<size_t>(stage)] = progress;
         pathTangents[static_cast<size_t>(stage)] =
             path_tangent_at_progress(progress, referenceRotation);
 
-        double rate = fixedProgressRates(stage);
-        if(not _fixedProgressSchedule and _warmStart.size() == controlDim)
+        additionalReferenceTangents[static_cast<size_t>(stage)] =
+            additional_reference_tangents(
+                stage, progress, referenceRotation, parentTransform(stage));
+        if(additionalReferenceTangents[static_cast<size_t>(stage)].rows() != ERROR_DIM
+           or additionalReferenceTangents[static_cast<size_t>(stage)].cols()
+                != stageControlDim - BASE_STAGE_CONTROL_DIMENSION
+           or not additionalReferenceTangents[static_cast<size_t>(stage)].allFinite())
         {
-            rate = _warmStart(stage * NU + 6);
+            throw std::runtime_error(
+                "[ERROR] [SERIAL LINK MPCC] Invalid additional reference tangent dimensions.");
+        }
+
+        double rate = fixedProgressRates(stage);
+        if(not _fixedProgressSchedule and _warmStart.size() >= controlDim)
+        {
+            rate = _warmStart(stage * stageControlDim + PROGRESS_RATE_INDEX);
         }
         referenceMotionJacobians[static_cast<size_t>(stage)] =
             pathTangents[static_cast<size_t>(stage)];
@@ -294,7 +401,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     }
 
     // Linearised error prediction:
-    // e_j = e_0 + dt * sum_{i<=j}(u_i - tau(s_i) * sdot_i).
+    // e_j = e_0 + dt * sum_{i<=j}(xi_i - tau_s(s_i)*sdot_i
+    //                              - tau_virtual(s_i)*virtual_rate_i).
     MatrixXd errorResponse = MatrixXd::Zero(errorDim, controlDim);
     VectorXd errorOffset = VectorXd::Zero(errorDim);
     MatrixXd errorWeight = MatrixXd::Zero(errorDim, errorDim);
@@ -328,20 +436,37 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                     _matchedOrientationGain, 1.6, _dt);
             }
         }
-        const Eigen::Matrix3d positionWeight =
+        const Eigen::Matrix3d defaultPositionWeight =
             contourWeight * Eigen::Matrix3d::Identity()
             + (lagWeight - contourWeight) * positionLagProjection;
+        const Eigen::Matrix3d positionWeight = position_error_weight(
+            stage, tangent, defaultPositionWeight, referenceRotation,
+            parentTransform(stage + 1));
+        if(not positionWeight.allFinite())
+        {
+            throw std::runtime_error(
+                "[ERROR] [SERIAL LINK MPCC] position_error_weight(): non-finite matrix.");
+        }
         errorWeight.block<3,3>(row, row) = positionWeight;
         errorWeight.block<3,3>(row + 3, row + 3) =
             orientationWeight * Eigen::Matrix3d::Identity();
 
         for(int input = 0; input <= stage; ++input)
         {
-            const int column = input * NU;
+            const int column = input * stageControlDim;
             errorResponse.block<ERROR_DIM,ERROR_DIM>(row, column) +=
                 _dt * Eigen::Matrix<double,ERROR_DIM,ERROR_DIM>::Identity();
-            errorResponse.block<ERROR_DIM,1>(row, column + 6) +=
+            errorResponse.block<ERROR_DIM,1>(row, column + PROGRESS_RATE_INDEX) +=
                 -_dt * referenceMotionJacobians[static_cast<size_t>(input)];
+            const int additionalCount =
+                stageControlDim - BASE_STAGE_CONTROL_DIMENSION;
+            if(additionalCount > 0)
+            {
+                errorResponse.block(
+                    row, column + BASE_STAGE_CONTROL_DIMENSION,
+                    ERROR_DIM, additionalCount) +=
+                    -_dt * additionalReferenceTangents[static_cast<size_t>(input)];
+            }
             errorOffset.segment<ERROR_DIM>(row) -=
                 _dt * referenceMotionOffsets[static_cast<size_t>(input)];
         }
@@ -382,9 +507,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     const MatrixXd pathVelocityWeightHorizon =
         RobotLibrary::Math::block_diagonal(pathVelocityWeight, static_cast<unsigned int>(N));
 
-    Eigen::Matrix<double,NU,NU> inputWeight =
-        Eigen::Matrix<double,NU,NU>::Zero();
-    inputWeight.diagonal() <<
+    MatrixXd inputWeight = MatrixXd::Zero(stageControlDim, stageControlDim);
+    inputWeight.diagonal().head<BASE_STAGE_CONTROL_DIMENSION>() <<
         inputLinearWeight, inputLinearWeight, inputLinearWeight,
         inputAngularWeight, inputAngularWeight, inputAngularWeight,
         inputProgressWeight;
@@ -399,7 +523,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                  remaining / std::max(static_cast<double>(N) * _dt, 1e-9));
     for(int stage = 0; stage < N; ++stage)
     {
-        const int offset = stage * NU;
+        const int offset = stage * stageControlDim;
         const int row = stage * ERROR_DIM;
         const double stageSeedRate = _fixedProgressSchedule
             ? fixedProgressRates(stage) : nominalSeedRate;
@@ -407,28 +531,47 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             parentMotionActive
             ? referenceMotions[static_cast<size_t>(stage)]
             : pathTangents[static_cast<size_t>(stage)] * stageSeedRate;
-        nominalControl(offset + 6) = stageSeedRate;
+        nominalControl(offset + PROGRESS_RATE_INDEX) = stageSeedRate;
         pathVelocityResponse.block<ERROR_DIM,ERROR_DIM>(row, offset).setIdentity();
-        pathVelocityResponse.block<ERROR_DIM,1>(row, offset + 6) =
+        pathVelocityResponse.block<ERROR_DIM,1>(row, offset + PROGRESS_RATE_INDEX) =
             -referenceMotionJacobians[static_cast<size_t>(stage)];
+        const int additionalCount =
+            stageControlDim - BASE_STAGE_CONTROL_DIMENSION;
+        if(additionalCount > 0)
+        {
+            pathVelocityResponse.block(
+                row, offset + BASE_STAGE_CONTROL_DIMENSION,
+                ERROR_DIM, additionalCount) =
+                -additionalReferenceTangents[static_cast<size_t>(stage)];
+        }
         pathVelocityOffset.segment<ERROR_DIM>(row) =
             -referenceMotionOffsets[static_cast<size_t>(stage)];
     }
 
-    MatrixXd difference = MatrixXd::Zero(controlDim, controlDim);
+    const int baseDifferenceDim = BASE_STAGE_CONTROL_DIMENSION * N;
+    MatrixXd difference = MatrixXd::Zero(baseDifferenceDim, controlDim);
     for(int stage = 0; stage < N; ++stage)
     {
-        difference.block<NU,NU>(stage * NU, stage * NU).setIdentity();
+        difference.block(
+            stage * BASE_STAGE_CONTROL_DIMENSION,
+            stage * stageControlDim,
+            BASE_STAGE_CONTROL_DIMENSION,
+            BASE_STAGE_CONTROL_DIMENSION).setIdentity();
         if(stage > 0)
         {
-            difference.block<NU,NU>(stage * NU, (stage - 1) * NU) =
-                -Eigen::Matrix<double,NU,NU>::Identity();
+            difference.block(
+                stage * BASE_STAGE_CONTROL_DIMENSION,
+                (stage - 1) * stageControlDim,
+                BASE_STAGE_CONTROL_DIMENSION,
+                BASE_STAGE_CONTROL_DIMENSION) =
+                -Eigen::Matrix<double,BASE_STAGE_CONTROL_DIMENSION,
+                               BASE_STAGE_CONTROL_DIMENSION>::Identity();
         }
     }
     const MatrixXd deltaWeight =
-        _wDeltaU * MatrixXd::Identity(controlDim, controlDim);
-    VectorXd deltaReference = VectorXd::Zero(controlDim);
-    deltaReference.head<NU>() = _uLast;
+        _wDeltaU * MatrixXd::Identity(baseDifferenceDim, baseDifferenceDim);
+    VectorXd deltaReference = VectorXd::Zero(baseDifferenceDim);
+    deltaReference.head<BASE_STAGE_CONTROL_DIMENSION>() = _uLast;
 
     MatrixXd H =
         errorResponse.transpose() * errorWeight * errorResponse
@@ -446,22 +589,23 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     const double progressReward = optimizedProgress ? 0.2 : _qProgressReward;
     for(int stage = 0; stage < N; ++stage)
     {
-        f(stage * NU + 6) -= progressReward * _dt;
+        f(stage * stageControlDim + PROGRESS_RATE_INDEX) -= progressReward * _dt;
     }
 
     VectorXd lower = VectorXd::Zero(controlDim);
     VectorXd upper = VectorXd::Zero(controlDim);
     for(int stage = 0; stage < N; ++stage)
     {
-        const int offset = stage * NU;
+        const int offset = stage * stageControlDim;
         lower.segment<3>(offset).setConstant(-_vMaxLinear);
         upper.segment<3>(offset).setConstant(_vMaxLinear);
         lower.segment<3>(offset + 3).setConstant(-_vMaxAngular);
         upper.segment<3>(offset + 3).setConstant(_vMaxAngular);
-        lower(offset + 6) = _fixedProgressSchedule
+        lower(offset + PROGRESS_RATE_INDEX) = _fixedProgressSchedule
             ? fixedProgressRates(stage) : progressMinimum;
-        upper(offset + 6) = _fixedProgressSchedule
+        upper(offset + PROGRESS_RATE_INDEX) = _fixedProgressSchedule
             ? fixedProgressRates(stage) : _vProgressMax;
+        configure_additional_stage_inputs(stage, lower, upper, nominalControl);
     }
 
     const RobotLibrary::Math::BoxConstraint box =
@@ -474,7 +618,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     constraintVector.head(box.constraintVector.size()) = box.constraintVector;
     for(int stage = 0; stage < N; ++stage)
     {
-        constraintMatrix(box.constraintMatrix.rows(), stage * NU + 6) = _dt;
+        constraintMatrix(box.constraintMatrix.rows(),
+                         stage * stageControlDim + PROGRESS_RATE_INDEX) = _dt;
     }
     constraintVector.tail<1>()(0) = remaining;
 
@@ -492,7 +637,8 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         double predictedAdvance = 0.0;
         for(int stage = 0; stage < N; ++stage)
         {
-            predictedAdvance += _dt * seed(stage * NU + 6);
+            predictedAdvance += _dt * seed(
+                stage * stageControlDim + PROGRESS_RATE_INDEX);
         }
         if(not _fixedProgressSchedule and predictedAdvance > remaining)
         {
@@ -500,20 +646,48 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                 (N > 0 and _dt > 0.0) ? remaining / (static_cast<double>(N) * _dt) : 0.0;
             for(int stage = 0; stage < N; ++stage)
             {
-                seed(stage * NU + 6) = feasibleRate;
+                seed(stage * stageControlDim + PROGRESS_RATE_INDEX) = feasibleRate;
             }
         }
         return seed;
     };
 
-    VectorXd seed = make_feasible(_warmStart);
+    VectorXd baseWarmStart;
+    if(_warmStart.size() >= controlDim)
+    {
+        baseWarmStart = _warmStart.head(controlDim);
+    }
+    VectorXd seed = make_feasible(baseWarmStart);
+    MpccQpExtensionContext extensionContext;
+    extensionContext.horizon = N;
+    extensionContext.baseControlDimension = controlDim;
+    extensionContext.stageControlDimension = stageControlDim;
+    extensionContext.dt = _dt;
+    extensionContext.predictionRotation = referenceRotation;
+    extensionContext.currentToolPositionBase = currentToolPositionBase;
+    extensionContext.parentTransforms = parentTransforms;
+    extensionContext.stageProgress = stageProgress;
+    extensionContext.previousWarmStart = _warmStart;
+    extend_qp_problem(extensionContext, H, f, constraintMatrix, constraintVector, seed);
+    if(H.rows() != H.cols() or f.size() != H.rows()
+       or constraintMatrix.cols() != H.cols()
+       or constraintVector.size() != constraintMatrix.rows()
+       or seed.size() != H.rows() or not H.allFinite() or not f.allFinite())
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK MPCC] extend_qp_problem(): inconsistent augmented QP.");
+    }
+    H = 0.5 * (H + H.transpose());
     _diagnostics.qpStatus = 0.0;
+    const auto solveStart = std::chrono::steady_clock::now();
     VectorXd optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
+    _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - solveStart).count();
     const SolverResults<double> qpResults = _qpSolver.results();
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
     _diagnostics.qpObjective = qpResults.objectiveFunction;
-    if(optimum.size() != controlDim or not optimum.allFinite())
+    if(optimum.size() != H.rows() or not optimum.allFinite())
     {
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): QP returned an invalid solution.");
@@ -527,25 +701,35 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             + std::to_string(constraintViolation) + ").");
     }
     _diagnostics.qpStatus = 1.0;
+    _diagnostics.stageControlDimension = stageControlDim;
+    _diagnostics.optimalHorizon = optimum;
 
     _warmStart = optimum;
     for(int stage = 0; stage < N - 1; ++stage)
     {
-        _warmStart.segment<NU>(stage * NU) = optimum.segment<NU>((stage + 1) * NU);
+        _warmStart.segment(stage * stageControlDim, stageControlDim) =
+            optimum.segment((stage + 1) * stageControlDim, stageControlDim);
     }
+    shift_extension_warm_start(extensionContext, optimum, _warmStart);
+    _diagnostics.shiftedWarmStart = _warmStart;
+    on_extended_qp_solution(extensionContext, optimum);
 
-    Eigen::Vector<double,NU> firstControl = optimum.head<NU>();
+    Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION> firstControl =
+        optimum.head<BASE_STAGE_CONTROL_DIMENSION>();
     for(int i = 0; i < 3; ++i)
     {
         firstControl(i) = std::clamp(firstControl(i), -_vMaxLinear, _vMaxLinear);
         firstControl(i + 3) =
             std::clamp(firstControl(i + 3), -_vMaxAngular, _vMaxAngular);
     }
-    firstControl(6) = std::clamp(firstControl(6), lower(6), upper(6));
+    firstControl(PROGRESS_RATE_INDEX) = std::clamp(
+        firstControl(PROGRESS_RATE_INDEX),
+        lower(PROGRESS_RATE_INDEX), upper(PROGRESS_RATE_INDEX));
     _diagnostics.parentFrameMotionActive = parentMotionActive;
     _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
     _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
     _diagnostics.parentMeasurementTimeSeconds = _parentFrameMotion.current_time();
+    _diagnostics.parentMeasurementAgeSeconds = parentMeasurementAgeSeconds;
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
     const Eigen::Matrix4d firstPathPose =
@@ -558,6 +742,122 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             _trajectory.tangent_at_progress(_pathProgress),
             firstControl(6), _dt, parentTransform(0), parentTransform(1));
     return firstControl;
+}
+
+RobotLibrary::Model::Pose
+SerialLinkMPCC::reference_pose_at_progress(const double progress)
+{
+    return RobotLibrary::Trajectory::express_pose_in_base(
+        _trajectoryFrame, _trajectory.pose_at_progress(progress));
+}
+
+Eigen::MatrixXd
+SerialLinkMPCC::additional_reference_tangents(
+    const int stage,
+    const double progress,
+    const Eigen::Matrix3d &predictionRotation,
+    const Eigen::Matrix4d &predictedParentTransform) const
+{
+    (void)stage;
+    (void)progress;
+    (void)predictionRotation;
+    (void)predictedParentTransform;
+    return Eigen::MatrixXd::Zero(
+        ERROR_DIM, stage_control_dimension() - BASE_STAGE_CONTROL_DIMENSION);
+}
+
+void
+SerialLinkMPCC::configure_additional_stage_inputs(
+    const int stage,
+    Eigen::VectorXd &lower,
+    Eigen::VectorXd &upper,
+    Eigen::VectorXd &nominal) const
+{
+    const int additionalCount =
+        stage_control_dimension() - BASE_STAGE_CONTROL_DIMENSION;
+    if(additionalCount <= 0)
+    {
+        return;
+    }
+    const int offset = stage * stage_control_dimension()
+        + BASE_STAGE_CONTROL_DIMENSION;
+    lower.segment(offset, additionalCount).setZero();
+    upper.segment(offset, additionalCount).setZero();
+    nominal.segment(offset, additionalCount).setZero();
+}
+
+void
+SerialLinkMPCC::reset_additional_virtual_state()
+{
+}
+
+Eigen::Matrix3d
+SerialLinkMPCC::position_error_weight(
+    const int stage,
+    const Eigen::Vector<double,ERROR_DIM> &pathTangent,
+    const Eigen::Matrix3d &defaultWeight,
+    const Eigen::Matrix3d &predictionRotation,
+    const Eigen::Matrix4d &predictedParentTransform) const
+{
+    (void)stage;
+    (void)pathTangent;
+    (void)predictionRotation;
+    (void)predictedParentTransform;
+    return defaultWeight;
+}
+
+void
+SerialLinkMPCC::extend_qp_problem(const MpccQpExtensionContext &context,
+                                  Eigen::MatrixXd &hessian,
+                                  Eigen::VectorXd &gradient,
+                                  Eigen::MatrixXd &constraintMatrix,
+                                  Eigen::VectorXd &constraintVector,
+                                  Eigen::VectorXd &seed)
+{
+    (void)context;
+    (void)hessian;
+    (void)gradient;
+    (void)constraintMatrix;
+    (void)constraintVector;
+    (void)seed;
+}
+
+void
+SerialLinkMPCC::shift_extension_warm_start(
+    const MpccQpExtensionContext &context,
+    const Eigen::VectorXd &optimum,
+    Eigen::VectorXd &shiftedWarmStart)
+{
+    (void)context;
+    (void)optimum;
+    (void)shiftedWarmStart;
+}
+
+void
+SerialLinkMPCC::on_extended_qp_solution(const MpccQpExtensionContext &context,
+                                        const Eigen::VectorXd &optimum)
+{
+    (void)context;
+    (void)optimum;
+}
+
+Eigen::Vector<double,6>
+SerialLinkMPCC::postprocess_base_twist(const Eigen::Vector<double,6> &baseTwist,
+                                       const double dt)
+{
+    (void)dt;
+    return baseTwist;
+}
+
+void
+SerialLinkMPCC::on_twist_resolved(
+    const Eigen::Vector<double,6> &commandedBaseTwist,
+    const Eigen::Vector<double,6> &realizedBaseTwist,
+    const double dt)
+{
+    (void)commandedBaseTwist;
+    (void)realizedBaseTwist;
+    (void)dt;
 }
 
 Eigen::Vector<double,6>

@@ -23,6 +23,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <memory>
+#include <vector>
 
 namespace RobotLibrary { namespace Control {
 
@@ -58,10 +59,25 @@ enum class MpccAblationProfile
     MatchedFeedbackGain
 };
 
+struct MpccObjectiveParameters
+{
+    double contourWeight = 1000.0;
+    double lagWeight = 10.0;
+    double orientationWeight = 40.0;
+    double inputLinearWeight = 3e-4;
+    double inputAngularWeight = 3e-4;
+    double inputProgressWeight = 5e-4;
+    double inputDifferenceWeight = 3e-5;
+    double pathVelocityWeight = 2e-4;
+    double progressReward = 2e-4;
+};
+
 struct MpccDiagnostics
 {
     Eigen::Vector<double,6> error = Eigen::Vector<double,6>::Zero();
     Eigen::Vector<double,6> bodyTwist = Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> commandedBaseTwist = Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> realizedBaseTwist = Eigen::Vector<double,6>::Zero();
     Eigen::Vector<double,6> realizedBodyTwist = Eigen::Vector<double,6>::Zero();
     double progressRate = 0.0;
     double referenceProgress = 0.0;
@@ -72,6 +88,7 @@ struct MpccDiagnostics
     double qpIterations = 0.0;
     double qpFinalStepSize = 0.0;
     double qpObjective = 0.0;
+    double qpSolveTimeSeconds = 0.0;
     double twistRealizationError = 0.0;
     bool parentFrameMotionActive = false;
     Eigen::Vector<double,6> parentFrameBodyTwist = Eigen::Vector<double,6>::Zero();
@@ -81,6 +98,24 @@ struct MpccDiagnostics
     Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
     double parentMeasurementTimeSeconds = 0.0;
+    double parentMeasurementAgeSeconds = 0.0;
+    int stageControlDimension = 7;
+    Eigen::VectorXd optimalHorizon;
+    Eigen::VectorXd shiftedWarmStart;
+};
+
+/** Read-only horizon geometry passed to optional MPCC QP extensions. */
+struct MpccQpExtensionContext
+{
+    int horizon = 0;
+    int baseControlDimension = 0;
+    int stageControlDimension = 7;
+    double dt = 0.0;
+    Eigen::Matrix3d predictionRotation = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d currentToolPositionBase = Eigen::Vector3d::Zero();
+    std::vector<Eigen::Matrix4d> parentTransforms;
+    std::vector<double> stageProgress;
+    Eigen::VectorXd previousWarmStart;
 };
 
 class SerialLinkMPCC : public SerialLinkVelocityBase
@@ -141,6 +176,14 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         void
         set_linear_velocity_limit(double linearVelocityMax);
 
+        /** Configure the condensed-QP objective without changing its structure. */
+        void
+        set_objective_parameters(const MpccObjectiveParameters &parameters);
+
+        /** Explicit normalized progress-rate bounds, callable after set_trajectory(). */
+        void
+        set_progress_rate_limits(double minimum, double nominal, double maximum);
+
         /** Cartesian linear-velocity bound used by the MPCC QP. */
         double
         linear_velocity_limit() const { return _vMaxLinear; }
@@ -168,6 +211,10 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         Eigen::VectorXd
         step(double dt, double estimatedProgress);
 
+        /** Run a step while compensating a timestamped parent-frame sample to control time. */
+        Eigen::VectorXd
+        step_at_time(double controlTimeSeconds, double dt);
+
         /**
          * @brief Current internally integrated path progress.
          */
@@ -178,6 +225,11 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         diagnostics() const { return _diagnostics; }
 
     protected:
+        static constexpr int ERROR_DIM = 6;
+        static constexpr int PHYSICAL_TWIST_DIMENSION = 6;
+        static constexpr int PROGRESS_RATE_INDEX = 6;
+        static constexpr int BASE_STAGE_CONTROL_DIMENSION = 7;
+
         /**
          * @brief Generate the local path tangent used by the MPCC prediction.
          *
@@ -192,13 +244,85 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         RobotLibrary::Trajectory::CartesianSpline &
         reference_trajectory() { return _trajectory; }
 
+        const RobotLibrary::Trajectory::CartesianSpline &
+        reference_trajectory() const { return _trajectory; }
+
         const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &
         trajectory_frame() const { return _trajectoryFrame; }
 
-    private:
-        static constexpr int ERROR_DIM = 6;
-        static constexpr int NU = 7;
+        /** Reference pose used for the current tracking error. */
+        virtual RobotLibrary::Model::Pose
+        reference_pose_at_progress(double progress);
 
+        /** Number of decision variables in each horizon stage. */
+        virtual int
+        stage_control_dimension() const { return BASE_STAGE_CONTROL_DIMENSION; }
+
+        /**
+         * Reference-coordinate tangents for virtual inputs after s_dot.
+         * Columns are expressed in the same fixed local prediction frame as
+         * the physical twist and path tangent.  The predictor inserts them as
+         * -dt*tangent*virtual_rate.
+         */
+        virtual Eigen::MatrixXd
+        additional_reference_tangents(
+            int stage,
+            double progress,
+            const Eigen::Matrix3d &predictionRotation,
+            const Eigen::Matrix4d &predictedParentTransform) const;
+
+        /** Configure box bounds and a feasible nominal value for extra inputs. */
+        virtual void
+        configure_additional_stage_inputs(int stage,
+                                          Eigen::VectorXd &lower,
+                                          Eigen::VectorXd &upper,
+                                          Eigen::VectorXd &nominal) const;
+
+        /** Reset controller-owned virtual coordinates on a new trajectory. */
+        virtual void
+        reset_additional_virtual_state();
+
+        /** Default returns the original MPCC position weight unchanged. */
+        virtual Eigen::Matrix3d
+        position_error_weight(
+            int stage,
+            const Eigen::Vector<double,ERROR_DIM> &pathTangent,
+            const Eigen::Matrix3d &defaultWeight,
+            const Eigen::Matrix3d &predictionRotation,
+            const Eigen::Matrix4d &predictedParentTransform) const;
+
+        /** Optional cost/constraint/variable augmentation; default is a no-op. */
+        virtual void
+        extend_qp_problem(const MpccQpExtensionContext &context,
+                          Eigen::MatrixXd &hessian,
+                          Eigen::VectorXd &gradient,
+                          Eigen::MatrixXd &constraintMatrix,
+                          Eigen::VectorXd &constraintVector,
+                          Eigen::VectorXd &seed);
+
+        /** Shift variables appended after the stage-stacked decision vector. */
+        virtual void
+        shift_extension_warm_start(const MpccQpExtensionContext &context,
+                                   const Eigen::VectorXd &optimum,
+                                   Eigen::VectorXd &shiftedWarmStart);
+
+        /** Observe a valid augmented-QP solution. */
+        virtual void
+        on_extended_qp_solution(const MpccQpExtensionContext &context,
+                                const Eigen::VectorXd &optimum);
+
+        /** Optional composition point between MPCC and resolved-rate IK. */
+        virtual Eigen::Vector<double,6>
+        postprocess_base_twist(const Eigen::Vector<double,6> &baseTwist,
+                               double dt);
+
+        /** Observe the endpoint twist actually realizable by the joint command. */
+        virtual void
+        on_twist_resolved(const Eigen::Vector<double,6> &commandedBaseTwist,
+                          const Eigen::Vector<double,6> &realizedBaseTwist,
+                          double dt);
+
+    private:
         unsigned int _horizon = 20;
         double _dt = 0.002;
 
@@ -237,15 +361,21 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         // Controller-owned progress; future progress is predicted inside the QP.
         double _pathProgress = 0.0;
         bool _fixedProgressSchedule = false;
-        Eigen::Vector<double,NU> _uLast = Eigen::Vector<double,NU>::Zero();
+        Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION> _uLast =
+            Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION>::Zero();
         Eigen::VectorXd _warmStart;
 
         QPSolver<double> _qpSolver;
         MpccDiagnostics _diagnostics;
 
-        Eigen::Vector<double,NU>
+        Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION>
         solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
-                   const Eigen::Matrix3d &referenceRotation);
+                   const Eigen::Matrix3d &referenceRotation,
+                   const Eigen::Vector3d &currentToolPositionBase,
+                   double parentMeasurementAgeSeconds);
+
+        Eigen::VectorXd
+        step_impl(double dt, double parentMeasurementAgeSeconds);
 };
 
 } } // namespace

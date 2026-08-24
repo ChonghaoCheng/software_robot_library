@@ -6,6 +6,7 @@
 #ifndef SERIAL_LINK_MOVING_FRAME_MPC_H
 #define SERIAL_LINK_MOVING_FRAME_MPC_H
 
+#include <Control/Contact/ContactDataStructures.h>
 #include <Control/TrajectoryTracking/SerialLinkMPC.h>
 
 #include <deque>
@@ -23,50 +24,6 @@ struct MovingFrameState
 {
     RobotLibrary::Model::Pose pose;
     Eigen::Vector<double,6> twist = Eigen::Vector<double,6>::Zero();
-};
-
-/**
- * @brief How the contact normal force is folded into the MPC.
- */
-enum class ContactMode
-{
-    Disabled,    ///< No force term; pure board-glued pose tracking (original behaviour).
-    Loss,        ///< Soft force tracking: forceWeight * (F_k - targetForce)^2 added to the cost.
-    Constraint   ///< Hard force band F_d +/- tol per step, enforced with per-step slack variables.
-};
-
-/**
- * @brief Contact-force parameters for SerialLinkMovingFrameMPC.
- *
- * Defaults are ported from the legacy follow_contact_force server's MpcParameters
- * and config/contact_mpc_constraint.yaml. The board surface is modelled as a local
- * linear spring: F = forceResponseGain * (normal penetration). Normal and tangent
- * axes are given in the board frame (the MovingFrameState pose); they default to the
- * board geometry used in simulation (inward normal along -Y, tangent along +X).
- */
-struct ContactParameters
-{
-    ContactMode mode = ContactMode::Disabled;
-
-    double forceResponseGain   = 1500.0;   ///< Local normal stiffness k_c [N/m].
-    double targetForce         = 5.0;      ///< Desired normal force [N].
-    double forceTolerance      = 1.0;      ///< Half-width of the force band in Constraint mode [N].
-    double forceWeight         = 1.0;      ///< Weight on the force-tracking loss (Loss mode).
-    double slackWeight         = 1000.0;   ///< Penalty on per-step force slack (Constraint mode).
-    double maxForceSlack       = 50.0;     ///< Upper bound on each force slack [N].
-
-    double tangentPositionWeight = 60.0;   ///< Cost weight on in-surface (tangent) position error.
-    double normalPositionWeight  = 3.0;    ///< Cost weight on normal position error (kept small).
-    double orientationWeight     = 5.0;    ///< Cost weight on orientation error.
-    double velocityWeight        = 0.02;   ///< Regularisation on the commanded twist.
-    double deltaVelocityWeight   = 0.1;    ///< Regularisation on twist increments (smoothing).
-
-    /// Board-frame axes defining the contact surface. inwardNormal = -(R_board * normalAxis).
-    Eigen::Vector3d normalAxisInBoard  = -Eigen::Vector3d::UnitY();
-    Eigen::Vector3d tangentAxisInBoard =  Eigen::Vector3d::UnitX();
-
-    bool   useAcceleration   = true;       ///< Use the constant-acceleration board model (else const velocity).
-    double maxBoardAcceleration = 5.0;     ///< Clamp on estimated board linear acceleration [m/s^2].
 };
 
 /**
@@ -115,14 +72,19 @@ class SerialLinkMovingFrameMPC : public SerialLinkMPC
          *        leaves the original pose-tracking behaviour untouched.
          */
         void
-        set_contact_parameters(const ContactParameters &parameters) { _contactParameters = parameters; }
+        set_contact_parameters(const ContactParameters &parameters);
 
         /**
          * @brief Supply the latest measured normal force (F/T wrench projected on the board
-         *        normal upstream). Required when the contact mode is not Disabled.
+         *        inward normal upstream, positive in compression). Required when
+         *        the contact mode is not Disabled.
          */
         void
-        update_measured_normal_force(double force) { _measuredNormalForce = force; }
+        update_measured_normal_force(double force);
+
+        /** Latest contact-QP status and force prediction. */
+        const ContactMpcDiagnostics&
+        contact_diagnostics() const { return _contactDiagnostics; }
 
         /**
          * @brief Push a new board pose sample for the in-class motion predictor.
@@ -147,7 +109,7 @@ class SerialLinkMovingFrameMPC : public SerialLinkMPC
          *        Uses a constant-acceleration model when enabled, else constant velocity.
          */
         std::vector<MovingFrameState>
-        predict_board_motion(unsigned int steps) const;
+        predict_board_motion(double controlTime, unsigned int steps) const;
 
         /**
          * @brief Solve the force-aware MPC (surface-frame pose tracking + board-relative
@@ -164,6 +126,8 @@ class SerialLinkMovingFrameMPC : public SerialLinkMPC
                           const std::vector<MovingFrameState> &boardStack);
 
         ContactParameters _contactParameters;                 ///< Force behaviour (default Disabled).
+
+        ContactMpcDiagnostics _contactDiagnostics;
 
         double _measuredNormalForce = 0.0;                    ///< Latest measured normal force [N].
 

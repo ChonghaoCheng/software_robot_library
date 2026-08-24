@@ -14,6 +14,8 @@
 
 #include <Control/Contact/SerialLinkGeometricImpedance.h>
 
+#include "detail/ContactGeometry.h"
+
 namespace RobotLibrary { namespace Control {
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,9 +53,11 @@ SerialLinkGeometricImpedance::track_endpoint_trajectory(const RobotLibrary::Mode
                                                         const Eigen::Vector<double,6>   &desiredVelocity,
                                                         const Eigen::Vector<double,6>   &desiredAcceleration)
 {
-    // Geometrically consistent SE(3) pose error (position + angle*axis orientation, base frame).
-    // NOTE: pose_error() also stores the position/orientation error magnitudes internally.
-    Eigen::Vector<double,6> poseError = pose_error(desiredPose);
+    // Preserve the public scalar diagnostics, but do not use pose_error()'s
+    // quaternion-imaginary rotational component as a spring displacement.
+    (void)pose_error(desiredPose);
+    const Eigen::Vector<double,6> poseError =
+        detail::impedance_pose_error(endpoint_pose(), desiredPose);
 
     Eigen::Vector<double,6> impedanceWrench = _cartesianPoseGain     * poseError
                                             + _cartesianVelocityGain * (desiredVelocity - endpoint_velocity());

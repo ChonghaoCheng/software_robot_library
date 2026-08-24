@@ -11,6 +11,9 @@ add_library(Control src/Core/SerialLinkBase.cpp
                     src/TrajectoryTracking/SerialLinkRMPCC.cpp
                     src/Contact/AdmittanceContactController.cpp
                     src/Contact/ContactControllerBase.cpp
+                    src/Contact/SerialLinkAdmittanceMPCC.cpp
+                    src/Contact/SerialLinkContactAdaptiveMPCC.cpp
+                    src/Contact/SerialLinkContactMPCC.cpp
                     src/Contact/SerialLinkGeometricImpedance.cpp
                     src/Contact/SerialLinkImpedance.cpp
                     src/Contact/SerialLinkMovingFrameMPC.cpp
@@ -29,7 +32,8 @@ if(BUILD_TESTING)
         add_executable(${target} ${source})
         target_link_libraries(${target} PRIVATE Control)
         target_include_directories(${target} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail)
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/TrajectoryTracking/detail
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/Contact/detail)
         add_test(NAME ${target} COMMAND ${target})
     endfunction()
 
@@ -53,6 +57,12 @@ if(BUILD_TESTING)
     add_control_test(mpcc_stage_tangent_coordinates_test test/TrajectoryTracking/MpccStageTangentCoordinates.cpp)
     add_control_test(common_progress_schedule_test test/TrajectoryTracking/CommonProgressSchedule.cpp)
     add_control_test(rmpcc_qp_constraints_test test/TrajectoryTracking/RmpccQpConstraints.cpp)
+    add_control_test(admittance_contact_controller_test test/Contact/AdmittanceContactController.cpp)
+    add_control_test(contact_geometry_test test/Contact/ContactGeometry.cpp)
+    add_control_test(moving_frame_contact_mpc_test test/Contact/MovingFrameContactMpc.cpp)
+    add_control_test(contact_mpcc_test test/Contact/ContactMPCC.cpp)
+    add_control_test(contact_adaptive_mpcc_test test/Contact/ContactAdaptiveMPCC.cpp)
+    add_control_test(contact_closed_loop_test test/Contact/ContactClosedLoop.cpp)
 
     # Offline N125-QP diagnostic utility. It is intentionally not a CTest
     # because it requires an explicitly supplied, non-committed snapshot.

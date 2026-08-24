@@ -10,18 +10,60 @@
 
 namespace RobotLibrary { namespace Control {
 
+/** How normal contact force is represented in a predictive controller. */
+enum class ContactMode
+{
+    Disabled,    ///< Motion controller only.
+    Loss,        ///< Add a soft normal-force tracking loss.
+    Constraint   ///< Enforce a force band with one nonnegative slack per stage.
+};
+
+/**
+ * @brief Shared force-model and surface-weight parameters for contact MPC/MPCC.
+ *
+ * normalAxisInBoard is always the inward normal: positive robot motion along
+ * R_board * normalAxisInBoard increases compressive normal force.
+ */
+struct ContactParameters
+{
+    ContactMode mode = ContactMode::Disabled;
+
+    double forceResponseGain = 1500.0; ///< Local normal stiffness [N/m].
+    double targetForce = 5.0;          ///< Desired compressive force [N].
+    double forceTolerance = 1.0;       ///< Constraint-band half width [N].
+    double forceWeight = 1.0;          ///< Loss-mode force weight.
+    double slackWeight = 1000.0;       ///< Constraint-mode slack weight.
+    double maxForceSlack = 50.0;       ///< Per-stage slack upper bound [N].
+
+    double tangentPositionWeight = 60.0; ///< In-surface cross-track weight.
+    double pathLagPositionWeight = 10.0; ///< Along-path lag weight (MPCC).
+    double normalPositionWeight = 3.0;   ///< Surface-normal position weight.
+    double orientationWeight = 5.0;
+    double velocityWeight = 0.02;
+    double deltaVelocityWeight = 0.1;
+
+    Eigen::Vector3d normalAxisInBoard = -Eigen::Vector3d::UnitY();
+    Eigen::Vector3d tangentAxisInBoard = Eigen::Vector3d::UnitX();
+
+    /** Keep the predictive force objective active while approaching a known surface. */
+    bool approachWhenNotInContact = false;
+
+    bool useAcceleration = true;
+    double maxBoardAcceleration = 5.0;
+};
+
 /**
  * @brief Runtime contact state supplied by a front-end or higher-level controller.
  *
- * normalBase points in the direction where positive robot velocity increases
- * the normal contact force. For a board top surface, this is usually the inward
- * surface normal, not the outward wrench normal.
+ * normalBase is the inward contact normal: positive robot velocity along it
+ * increases compressive normal force. measuredNormalForce is positive in
+ * compression.
  */
 struct ContactState
 {
     Eigen::Vector3d normalBase = Eigen::Vector3d::UnitZ();
     Eigen::Vector3d surfaceVelocityBase = Eigen::Vector3d::Zero();
-    double measuredNormalForce = 0.0;
+    double measuredNormalForce = 0.0; ///< Positive compression [N].
     bool inContact = false;
 };
 
@@ -71,6 +113,24 @@ struct ContactDiagnostics
     bool approachActive = false;
     bool releaseActive = false;
     bool normalValid = false;
+};
+
+/**
+ * @brief Diagnostics for the most recent moving-frame contact-MPC cycle.
+ */
+struct ContactMpcDiagnostics
+{
+    bool contactModeActive = false;
+    bool solverSucceeded = false;
+    bool fallbackUsed = false;
+    double measuredNormalForce = 0.0;          ///< Positive compression [N].
+    double currentSignedNormalCoordinate = 0.0;
+    double predictedFirstStepForce = 0.0;
+    double realizedFirstStepForce = 0.0;       ///< Prediction using the realized endpoint twist.
+    double maxForceSlack = 0.0;                ///< Largest optimized force slack [N].
+    double twistRealizationError = 0.0;
+    Eigen::Vector<double,6> firstCommand = Eigen::Vector<double,6>::Zero();
+    Eigen::Vector<double,6> realizedCommand = Eigen::Vector<double,6>::Zero();
 };
 
 } } // namespace
