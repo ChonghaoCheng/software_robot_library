@@ -44,6 +44,28 @@ int main()
     check((defaultNormal + Eigen::Vector3d::UnitY()).norm() <= 1e-15,
           "identity board maps the default inward normal to exactly -Y");
 
+    const Eigen::Vector3d wristLinear(0.12, -0.03, 0.07);
+    const Eigen::Vector3d wristAngular(0.0, 0.0, 2.0);
+    const Eigen::Vector3d wristToPoint(0.0, 0.10, 0.0);
+    const Eigen::Vector3d pointVelocity = offset_point_velocity(
+        wristLinear, wristAngular, identity, wristToPoint);
+    check((pointVelocity - Eigen::Vector3d(-0.08, -0.03, 0.07)).norm() <= 1e-15,
+          "+Z angular velocity at a +Y offset contributes -X point velocity");
+
+    Eigen::Vector<double,6> wristTwist;
+    wristTwist << wristLinear, wristAngular;
+    check((offset_point_velocity_map(identity, wristToPoint) * wristTwist
+           - pointVelocity).norm() <= 1e-15,
+          "[I, -skew(r)] maps the wrist-origin twist to the same point velocity");
+
+    const Eigen::Matrix3d endpointRotation = Eigen::AngleAxisd(
+        0.5 * M_PI, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    const Eigen::Vector3d rotatedPointVelocity = offset_point_velocity(
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY(),
+        endpointRotation, wristToPoint);
+    check((rotatedPointVelocity - Eigen::Vector3d(0.0, 0.0, 0.10)).norm() <= 2e-17,
+          "the endpoint-fixed offset is rotated to world before applying omega cross r");
+
     const Eigen::Vector3d board0(0.4, -0.2, 0.7);
     const Eigen::Vector3d tool0 = board0 + Eigen::Vector3d(0.1, 0.02, 0.0);
     const double d0 = signed_normal_coordinate(defaultNormal, tool0, board0);

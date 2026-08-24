@@ -28,6 +28,55 @@ inward_contact_normal(const Eigen::Matrix3d &boardRotation,
     return normal.normalized();
 }
 
+/**
+ * Velocity of a fixed physical point P attached to endpoint frame E.
+ *
+ * The supplied twist is the spatial twist of the E-frame origin, expressed in
+ * the world frame.  The offset is fixed in E, so r_EP^W = R_WE r_EP^E and
+ * v_P^W = v_E^W + omega_E^W x r_EP^W.
+ */
+inline Eigen::Vector3d
+offset_point_velocity(const Eigen::Vector3d &originLinearVelocityWorld,
+                      const Eigen::Vector3d &angularVelocityWorld,
+                      const Eigen::Matrix3d &endpointRotationWorld,
+                      const Eigen::Vector3d &pointOffsetEndpoint)
+{
+    if(not originLinearVelocityWorld.allFinite()
+       or not angularVelocityWorld.allFinite()
+       or not endpointRotationWorld.allFinite()
+       or not pointOffsetEndpoint.allFinite())
+    {
+        throw std::invalid_argument(
+            "Endpoint twist, rotation, and point offset must be finite.");
+    }
+    const Eigen::Vector3d pointOffsetWorld =
+        endpointRotationWorld * pointOffsetEndpoint;
+    return originLinearVelocityWorld
+         + angularVelocityWorld.cross(pointOffsetWorld);
+}
+
+/** Linear map [I, -[r_EP^W]_x] from [v_E^W; omega_E^W] to v_P^W. */
+inline Eigen::Matrix<double,3,6>
+offset_point_velocity_map(const Eigen::Matrix3d &endpointRotationWorld,
+                          const Eigen::Vector3d &pointOffsetEndpoint)
+{
+    if(not endpointRotationWorld.allFinite() or not pointOffsetEndpoint.allFinite())
+    {
+        throw std::invalid_argument(
+            "Endpoint rotation and point offset must be finite.");
+    }
+    const Eigen::Vector3d pointOffsetWorld =
+        endpointRotationWorld * pointOffsetEndpoint;
+    Eigen::Matrix<double,3,6> map = Eigen::Matrix<double,3,6>::Zero();
+    map.leftCols<3>().setIdentity();
+    Eigen::Matrix3d skew;
+    skew << 0.0, -pointOffsetWorld.z(), pointOffsetWorld.y(),
+            pointOffsetWorld.z(), 0.0, -pointOffsetWorld.x(),
+            -pointOffsetWorld.y(), pointOffsetWorld.x(), 0.0;
+    map.rightCols<3>() = -skew;
+    return map;
+}
+
 inline double
 signed_normal_coordinate(const Eigen::Vector3d &inwardNormal,
                          const Eigen::Vector3d &toolPosition,
