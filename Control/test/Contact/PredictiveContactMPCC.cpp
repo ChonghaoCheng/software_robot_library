@@ -114,6 +114,13 @@ void check_affine_case(const PredictiveContactKinematics &input,
            + affine.relativeVelocityOffset
            - explicitRollout.relativeNormalVelocity).cwiseAbs().maxCoeff() < 1e-13,
           label + ": condensed relative velocity equals explicit rollout");
+    check((affine.commandedRobotNormalVelocityMap * decision
+           - explicitRollout.commandedRobotNormalVelocity).cwiseAbs().maxCoeff() < 1e-13,
+          label + ": commanded robot-normal velocity equals explicit rollout");
+    check((affine.realizedRobotNormalVelocityMap * decision
+           + affine.realizedRobotNormalVelocityOffset
+           - explicitRollout.realizedRobotNormalVelocity).cwiseAbs().maxCoeff() < 1e-13,
+          label + ": realized robot-normal velocity equals explicit rollout");
 }
 
 class UrdfFixture
@@ -258,6 +265,36 @@ int main()
     check((pointMap * input
            - (originLinear + angularBase.cross(offsetBase))).norm() < 1e-14,
           "contact-point affine velocity map matches omega cross r helper convention");
+    Eigen::Vector<double,6> measuredWristTwist;
+    measuredWristTwist << originLinear, angularBase;
+    check((wrist_twist_to_contact_point_velocity(
+               measuredWristTwist, stationary.endpointRotationBase,
+               stationary.contactOffsetEndpoint)
+           - (originLinear + angularBase.cross(offsetBase))).norm() < 1e-14,
+          "measured wrist twist reconstructs the fixed-offset contact-point velocity");
+
+    // E07-A: exact scalar realization condensation for all candidate delay
+    // branches, measured nonzero z0, known past commands, angular lever arm,
+    // translation, pitch, zero U, and random bounded U.
+    for(int delay = 0; delay <= 5; ++delay)
+    {
+        for(const auto &base : {stationary, kinematics(translationTwist), pitch})
+        {
+            PredictiveContactKinematics aware = base;
+            aware.actuationAware = true;
+            aware.realizationAutoregressive = 0.9809437967444158;
+            aware.realizationInputGain = 0.007248865304869999;
+            aware.realizationDelay = delay;
+            aware.initialRealizedRobotNormalVelocity = 3.7e-5;
+            for(int sample = 0; sample < delay; ++sample)
+                aware.pastRobotNormalCommands.push_back(
+                    -2.0e-5 + 7.0e-6 * static_cast<double>(sample));
+            check_affine_case(aware, zero,
+                              "actuation-aware zero U delay " + std::to_string(delay));
+            check_affine_case(aware, random_decision(84),
+                              "actuation-aware random U delay " + std::to_string(delay));
+        }
+    }
 
     // 10-12 and 17: normalized cost is symmetric/PSD with the exact gradient;
     // M2 and M3 coincide at the same stiffness.
@@ -308,15 +345,25 @@ int main()
     const UrdfFixture fixture;
     {
         auto model = make_model(fixture.path);
+        SerialLinkParameters solverParameters;
+        solverParameters.mpccQpStepSizeTolerance = 1e-4;
+        solverParameters.qpsolver.maxSteps = 100;
         SerialLinkPredictiveContactMPCC controller(
-            model, "tool", SerialLinkParameters{}, 3, 0.002);
+            model, "tool", solverParameters, 3, 0.002);
         PredictiveContactMpccParameters parameters;
         parameters.mode = PredictiveContactMode::Active;
         parameters.compressionDirectionParent = Eigen::Vector3d::UnitZ();
         parameters.contactOffsetEndpoint.setZero();
+        parameters.actuationAware = true;
+        parameters.realizationDelay = 4;
+        parameters.normalActionGuardEnabled = true;
         controller.set_predictive_contact_parameters(parameters);
-        controller.set_force_measurement(3.25, true);
+        controller.set_normal_realization_state(
+            0.0, std::vector<double>(4, 0.0));
         set_path(controller);
+        controller.set_force_measurement(3.25, true);
+        controller.set_normal_realization_state(
+            0.0, std::vector<double>(4, 0.0));
         (void)controller.step_at_time(0.0, 0.002);
         const auto &diagnostics = controller.predictive_contact_diagnostics();
         check(diagnostics.predictedForce.size() == 3
@@ -325,10 +372,23 @@ int main()
               && diagnostics.predictedForce.minCoeff()
                    >= parameters.minimumForce - diagnostics.maximumForceSlack - 1e-7,
               "soft force upper/lower affine constraints hold");
-        check(diagnostics.predictedPenetrationIncrement.cwiseAbs().maxCoeff()
+        check(diagnostics.predictedPenetrationIncrement.size() == 3
+              && diagnostics.predictedPenetrationIncrement.cwiseAbs().maxCoeff()
                   <= parameters.maximumPenetrationIncrement
                      + diagnostics.maximumPenetrationSlack + 1e-9,
               "soft penetration trust-region constraints hold");
+        check(controller.diagnostics().stageControlDimension == 7,
+              "actuation-aware prediction does not change the stage decision dimension");
+        check(diagnostics.predictedCommandedRobotNormalVelocity.size() == 3
+              && diagnostics.predictedCommandedRobotNormalVelocity.cwiseAbs().maxCoeff()
+                  <= parameters.maximumRobotNormalCommand + 1e-10,
+              "robot-normal command magnitude constraints hold");
+        Eigen::VectorXd slew = diagnostics.predictedCommandedRobotNormalVelocity;
+        for(int index = slew.size() - 1; index > 0; --index)
+            slew(index) -= diagnostics.predictedCommandedRobotNormalVelocity(index - 1);
+        check(slew.size() == 3 && slew.cwiseAbs().maxCoeff()
+                  <= parameters.maximumRobotNormalCommandStep + 1e-10,
+              "robot-normal command slew constraints hold");
     }
 
     {
@@ -367,6 +427,13 @@ int main()
         check(not controller.predictive_contact_diagnostics().forceValid
               && controller.predictive_contact_diagnostics().predictedForce.size() == 0,
               "stale force explicitly disables prediction instead of reusing the old anchor");
+
+        controller.set_force_measurement(0.1, true);
+        (void)controller.step_at_time(0.003, 0.002);
+        check(controller.predictive_contact_diagnostics().forceValid
+              && not controller.predictive_contact_diagnostics().contactModelValid
+              && controller.predictive_contact_diagnostics().predictedForce.size() == 0,
+              "fresh near-zero force disables M3 instead of declaring valid contact");
 
         controller.set_force_measurement(2.5, true);
         bool threw = false;

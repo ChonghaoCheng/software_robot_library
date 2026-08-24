@@ -24,6 +24,14 @@ struct PredictiveContactKinematics
     Eigen::Vector3d contactOffsetEndpoint = Eigen::Vector3d::Zero();
     Eigen::Vector3d compressionDirectionParent{0.0, -1.0, 0.0};
     std::vector<Eigen::Matrix4d> parentTransforms;
+    /** Optional scalar commanded-to-realized robot-side normal dynamics. */
+    bool actuationAware = false;
+    double realizationAutoregressive = 0.0;
+    double realizationInputGain = 1.0;
+    int realizationDelay = 0;
+    double initialRealizedRobotNormalVelocity = 0.0;
+    /** Chronological r_cmd[-delay], ..., r_cmd[-1]. */
+    std::vector<double> pastRobotNormalCommands;
 };
 
 struct PredictiveContactAffineModel
@@ -37,6 +45,9 @@ struct PredictiveContactAffineModel
     std::vector<Eigen::Vector3d> boardLinearVelocitiesBase;
     std::vector<Eigen::Vector3d> boardAngularVelocitiesBase;
     std::vector<Eigen::Vector3d> normalsBase;
+    Eigen::MatrixXd commandedRobotNormalVelocityMap;
+    Eigen::MatrixXd realizedRobotNormalVelocityMap;
+    Eigen::VectorXd realizedRobotNormalVelocityOffset;
     Eigen::MatrixXd relativeVelocityMap;
     Eigen::VectorXd relativeVelocityOffset;
     Eigen::MatrixXd penetrationIncrementMap;
@@ -46,10 +57,19 @@ struct PredictiveContactAffineModel
 struct PredictiveContactRollout
 {
     Eigen::VectorXd relativeNormalVelocity;
+    Eigen::VectorXd commandedRobotNormalVelocity;
+    Eigen::VectorXd realizedRobotNormalVelocity;
     Eigen::VectorXd penetrationIncrement;
     Eigen::VectorXd force;
     std::vector<Eigen::Vector3d> contactPointPositionsBase;
 };
+
+/** Velocity of the fixed physical contact point from a measured wrist twist. */
+Eigen::Vector3d
+wrist_twist_to_contact_point_velocity(
+    const Eigen::Vector<double,6> &wristTwistBase,
+    const Eigen::Matrix3d &endpointRotationBase,
+    const Eigen::Vector3d &contactOffsetEndpoint);
 
 /** Build v_rel = A_v U + b_v and Delta-rho = A_rho U + b_rho. */
 PredictiveContactAffineModel

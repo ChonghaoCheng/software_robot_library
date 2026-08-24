@@ -34,6 +34,16 @@ struct PredictiveContactMpccParameters
     double maximumPenetrationSlack = 1.0e-3;
     double tangentPositionWeight = 260.0;
     double pathLagPositionWeight = 35.0;
+    bool actuationAware = false;
+    double realizationAutoregressive = 0.9809437967444158;
+    double realizationInputGain = 0.007248865304869999;
+    int realizationDelay = 4;
+    double minimumContactModelForce = 0.5;
+    bool normalActionGuardEnabled = false;
+    double maximumRobotNormalCommand = 1.0e-4;
+    double maximumRobotNormalCommandStep = 1.0e-6;
+    /** Dimensionless penalty on Delta r_cmd / maximumRobotNormalCommand. */
+    double normalCommandSmoothWeight = 1.0e-6;
     Eigen::Vector3d compressionDirectionParent{0.0, -1.0, 0.0};
     Eigen::Vector3d contactOffsetEndpoint{
         0.0005265895, 0.0999391081, -0.0399956612};
@@ -43,6 +53,7 @@ struct PredictiveContactMpccDiagnostics
 {
     PredictiveContactMode mode = PredictiveContactMode::Disabled;
     bool forceValid = false;
+    bool contactModelValid = false;
     bool forceObjectiveActive = false;
     double measuredForce = 0.0;
     double stiffness = 0.0;
@@ -51,6 +62,12 @@ struct PredictiveContactMpccDiagnostics
     double maximumForceSlack = 0.0;
     double maximumPenetrationSlack = 0.0;
     double optimizedRelativeNormalVelocityStage0 = 0.0;
+    double optimizedRobotNormalCommandStage0 = 0.0;
+    double measuredRobotNormalVelocity = 0.0;
+    double robotNormalCommandSlewStage0 = 0.0;
+    double normalCommandSmoothCost = 0.0;
+    Eigen::VectorXd predictedCommandedRobotNormalVelocity;
+    Eigen::VectorXd predictedRealizedRobotNormalVelocity;
     Eigen::VectorXd predictedRelativeNormalVelocity;
     Eigen::VectorXd predictedPenetrationIncrement;
     Eigen::VectorXd predictedForce;
@@ -68,6 +85,11 @@ class SerialLinkPredictiveContactMPCC : public SerialLinkMPCC
 
         /** A stale/invalid cycle must explicitly pass valid=false. */
         void set_force_measurement(double measuredForce, bool valid);
+
+        /** Set measured z0 and chronological issued r_cmd[-d],...,r_cmd[-1]. */
+        void set_normal_realization_state(
+            double measuredRobotNormalVelocity,
+            const std::vector<double> &pastRobotNormalCommands);
 
         const PredictiveContactMpccParameters &predictive_contact_parameters() const
         {
@@ -114,7 +136,10 @@ class SerialLinkPredictiveContactMPCC : public SerialLinkMPCC
         PredictiveContactMpccParameters _parameters;
         PredictiveContactMpccDiagnostics _diagnostics;
         double _measuredForce = 0.0;
-        bool _forceValid = false;
+        bool _measurementValid = false;
+        bool _contactModelValid = false;
+        double _measuredRobotNormalVelocity = 0.0;
+        std::vector<double> _pastRobotNormalCommands;
         PredictiveContactAffineModel _lastModel;
         Eigen::MatrixXd _lastForceMap;
         Eigen::VectorXd _lastForceConstant;

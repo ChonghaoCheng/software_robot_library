@@ -18,7 +18,11 @@ SerialLinkPredictiveContactMPCC::set_predictive_contact_parameters(
         parameters.maximumPenetrationIncrement, parameters.forceSlackWeight,
         parameters.penetrationSlackWeight, parameters.maximumForceSlack,
         parameters.maximumPenetrationSlack, parameters.tangentPositionWeight,
-        parameters.pathLagPositionWeight};
+        parameters.pathLagPositionWeight, parameters.realizationAutoregressive,
+        parameters.realizationInputGain, parameters.minimumContactModelForce,
+        parameters.maximumRobotNormalCommand,
+        parameters.maximumRobotNormalCommandStep,
+        parameters.normalCommandSmoothWeight};
     for(const double value : values)
     {
         if(not std::isfinite(value) || value < 0.0)
@@ -31,6 +35,10 @@ SerialLinkPredictiveContactMPCC::set_predictive_contact_parameters(
        || parameters.targetForce <= 0.0
        || parameters.maximumPenetrationIncrement <= 0.0
        || parameters.minimumForce > parameters.maximumForce
+       || parameters.realizationAutoregressive >= 1.0
+       || parameters.realizationDelay < 0
+       || parameters.maximumRobotNormalCommand <= 0.0
+       || parameters.maximumRobotNormalCommandStep <= 0.0
        || not parameters.compressionDirectionParent.allFinite()
        || parameters.compressionDirectionParent.norm() <= 1e-12
        || not parameters.contactOffsetEndpoint.allFinite())
@@ -40,6 +48,8 @@ SerialLinkPredictiveContactMPCC::set_predictive_contact_parameters(
     _parameters = parameters;
     _parameters.compressionDirectionParent.normalize();
     _diagnostics = PredictiveContactMpccDiagnostics{};
+    _pastRobotNormalCommands.assign(
+        static_cast<size_t>(_parameters.realizationDelay), 0.0);
 }
 
 void
@@ -51,14 +61,37 @@ SerialLinkPredictiveContactMPCC::set_force_measurement(
         throw std::invalid_argument(
             "A valid predictive contact-force measurement must be finite and nonnegative.");
     }
-    _forceValid = valid;
+    _measurementValid = valid;
     _measuredForce = valid ? measuredForce : 0.0;
+    _contactModelValid = valid
+        && measuredForce >= _parameters.minimumContactModelForce;
+}
+
+void
+SerialLinkPredictiveContactMPCC::set_normal_realization_state(
+    const double measuredRobotNormalVelocity,
+    const std::vector<double> &pastRobotNormalCommands)
+{
+    if(not std::isfinite(measuredRobotNormalVelocity)
+       || static_cast<int>(pastRobotNormalCommands.size())
+            != _parameters.realizationDelay)
+    {
+        throw std::invalid_argument("Invalid measured realization state/history.");
+    }
+    for(const double value : pastRobotNormalCommands)
+    {
+        if(not std::isfinite(value))
+            throw std::invalid_argument("Issued normal-command history must be finite.");
+    }
+    _measuredRobotNormalVelocity = measuredRobotNormalVelocity;
+    _pastRobotNormalCommands = pastRobotNormalCommands;
 }
 
 bool
 SerialLinkPredictiveContactMPCC::prediction_enabled() const
 {
-    return _parameters.mode != PredictiveContactMode::Disabled && _forceValid;
+    return _parameters.mode != PredictiveContactMode::Disabled
+        && _contactModelValid;
 }
 
 PredictiveContactKinematics
@@ -77,6 +110,14 @@ SerialLinkPredictiveContactMPCC::make_kinematics(
     kinematics.compressionDirectionParent =
         _parameters.compressionDirectionParent;
     kinematics.parentTransforms = context.parentTransforms;
+    kinematics.actuationAware = _parameters.actuationAware;
+    kinematics.realizationAutoregressive =
+        _parameters.realizationAutoregressive;
+    kinematics.realizationInputGain = _parameters.realizationInputGain;
+    kinematics.realizationDelay = _parameters.realizationDelay;
+    kinematics.initialRealizedRobotNormalVelocity =
+        _measuredRobotNormalVelocity;
+    kinematics.pastRobotNormalCommands = _pastRobotNormalCommands;
     return kinematics;
 }
 
@@ -89,7 +130,8 @@ SerialLinkPredictiveContactMPCC::position_error_weight(
     const Eigen::Matrix4d &predictedParentTransform) const
 {
     (void)stage;
-    if(_parameters.mode != PredictiveContactMode::Active || not _forceValid)
+    if(_parameters.mode != PredictiveContactMode::Active
+       || not prediction_enabled())
     {
         return defaultWeight;
     }
@@ -121,9 +163,12 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
 {
     _diagnostics = PredictiveContactMpccDiagnostics{};
     _diagnostics.mode = _parameters.mode;
-    _diagnostics.forceValid = _forceValid;
+    _diagnostics.forceValid = _measurementValid;
+    _diagnostics.contactModelValid = _contactModelValid;
     _diagnostics.measuredForce = _measuredForce;
     _diagnostics.stiffness = _parameters.stiffness;
+    _diagnostics.measuredRobotNormalVelocity =
+        _measuredRobotNormalVelocity;
     _baseControlDimension = context.baseControlDimension;
     if(not prediction_enabled())
     {
@@ -181,6 +226,29 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
     _diagnostics.forceGradientNorm =
         (gradient - forceGradientBefore).head(C).norm();
     _diagnostics.forceObjectiveActive = _parameters.forceWeight > 0.0;
+
+    // Keep the commanded robot-side normal action in the E06-Q force-safe
+    // small-signal domain and suppress horizon-to-horizon high-frequency action.
+    const Eigen::MatrixXd &commandMap =
+        _lastModel.commandedRobotNormalVelocityMap;
+    Eigen::MatrixXd slewMap = Eigen::MatrixXd::Zero(N, C);
+    Eigen::VectorXd slewOffset = Eigen::VectorXd::Zero(N);
+    slewMap.row(0) = commandMap.row(0);
+    const double previousCommand = _pastRobotNormalCommands.empty()
+        ? 0.0 : _pastRobotNormalCommands.back();
+    slewOffset(0) = -previousCommand;
+    for(int stage = 1; stage < N; ++stage)
+        slewMap.row(stage) = commandMap.row(stage) - commandMap.row(stage - 1);
+    if(_parameters.normalActionGuardEnabled)
+    {
+        const double smoothScale = _parameters.normalCommandSmoothWeight
+            / (_parameters.maximumRobotNormalCommand
+               * _parameters.maximumRobotNormalCommand);
+        hessian.topLeftCorner(C, C) +=
+            2.0 * smoothScale * slewMap.transpose() * slewMap;
+        gradient.head(C) +=
+            2.0 * smoothScale * slewMap.transpose() * slewOffset;
+    }
     for(int stage = 0; stage < N; ++stage)
     {
         hessian(C + stage, C + stage) +=
@@ -192,14 +260,18 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
     }
 
     const int oldRows = constraintMatrix.rows();
-    Eigen::MatrixXd bounded = Eigen::MatrixXd::Zero(oldRows + 8 * N, V);
+    const int actionRows = _parameters.normalActionGuardEnabled ? 4 * N : 0;
+    Eigen::MatrixXd bounded = Eigen::MatrixXd::Zero(
+        oldRows + 8 * N + actionRows, V);
     bounded.topRows(oldRows) = constraintMatrix;
-    Eigen::VectorXd limits = Eigen::VectorXd::Zero(oldRows + 8 * N);
+    Eigen::VectorXd limits = Eigen::VectorXd::Zero(
+        oldRows + 8 * N + actionRows);
     limits.head(oldRows) = constraintVector;
 
     for(int stage = 0; stage < N; ++stage)
     {
         const int row = oldRows + 8 * stage;
+        const int actionRow = oldRows + 8 * N + 4 * stage;
         const int forceSlack = C + stage;
         const int penetrationSlack = C + N + stage;
         const Eigen::RowVectorXd forceRow = _lastForceMap.row(stage);
@@ -236,6 +308,20 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
         bounded(row + 7, penetrationSlack) = 1.0;
         limits(row + 7) = _parameters.maximumPenetrationSlack / rhoScale;
 
+        if(_parameters.normalActionGuardEnabled)
+        {
+            bounded.block(actionRow, 0, 1, C) = commandMap.row(stage);
+            limits(actionRow) = _parameters.maximumRobotNormalCommand;
+            bounded.block(actionRow + 1, 0, 1, C) = -commandMap.row(stage);
+            limits(actionRow + 1) = _parameters.maximumRobotNormalCommand;
+            bounded.block(actionRow + 2, 0, 1, C) = slewMap.row(stage);
+            limits(actionRow + 2) =
+                _parameters.maximumRobotNormalCommandStep - slewOffset(stage);
+            bounded.block(actionRow + 3, 0, 1, C) = -slewMap.row(stage);
+            limits(actionRow + 3) =
+                _parameters.maximumRobotNormalCommandStep + slewOffset(stage);
+        }
+
         const double seededForce = forceConstant
             + forceRow.dot(seed.head(C));
         seed(forceSlack) = std::clamp(std::max({
@@ -260,7 +346,8 @@ SerialLinkPredictiveContactMPCC::shift_extension_warm_start(
     const Eigen::VectorXd &optimum,
     Eigen::VectorXd &shiftedWarmStart)
 {
-    if(_parameters.mode != PredictiveContactMode::Active || not _forceValid)
+    if(_parameters.mode != PredictiveContactMode::Active
+       || not prediction_enabled())
     {
         return;
     }
@@ -295,8 +382,32 @@ SerialLinkPredictiveContactMPCC::on_extended_qp_solution(
         + _lastModel.penetrationIncrementOffset;
     _diagnostics.predictedForce =
         _lastForceConstant + _lastForceMap * decision;
+    _diagnostics.predictedCommandedRobotNormalVelocity =
+        _lastModel.commandedRobotNormalVelocityMap * decision;
+    _diagnostics.predictedRealizedRobotNormalVelocity =
+        _lastModel.realizedRobotNormalVelocityMap * decision
+        + _lastModel.realizedRobotNormalVelocityOffset;
     _diagnostics.optimizedRelativeNormalVelocityStage0 =
         _diagnostics.predictedRelativeNormalVelocity(0);
+    _diagnostics.optimizedRobotNormalCommandStage0 =
+        _diagnostics.predictedCommandedRobotNormalVelocity(0);
+    const double previousCommand = _pastRobotNormalCommands.empty()
+        ? 0.0 : _pastRobotNormalCommands.back();
+    _diagnostics.robotNormalCommandSlewStage0 =
+        _diagnostics.optimizedRobotNormalCommandStage0 - previousCommand;
+    Eigen::VectorXd commandSlew =
+        _diagnostics.predictedCommandedRobotNormalVelocity;
+    if(commandSlew.size() > 0)
+    {
+        for(int stage = commandSlew.size() - 1; stage > 0; --stage)
+            commandSlew(stage) -= commandSlew(stage - 1);
+        commandSlew(0) -= previousCommand;
+        _diagnostics.normalCommandSmoothCost =
+            _parameters.normalCommandSmoothWeight
+            * commandSlew.squaredNorm()
+            / (_parameters.maximumRobotNormalCommand
+               * _parameters.maximumRobotNormalCommand);
+    }
     const Eigen::VectorXd normalizedResidual =
         (_diagnostics.predictedForce.array() - _parameters.targetForce)
         / _parameters.targetForce;
@@ -321,6 +432,11 @@ SerialLinkPredictiveContactMPCC::reset_additional_virtual_state()
     _lastForceMap.resize(0, 0);
     _lastForceConstant.resize(0);
     _baseControlDimension = 0;
+    _measurementValid = false;
+    _contactModelValid = false;
+    _measuredRobotNormalVelocity = 0.0;
+    _pastRobotNormalCommands.assign(
+        static_cast<size_t>(_parameters.realizationDelay), 0.0);
 }
 
 } } // namespace RobotLibrary::Control
