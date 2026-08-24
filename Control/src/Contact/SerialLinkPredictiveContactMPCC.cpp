@@ -248,6 +248,41 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
             2.0 * smoothScale * slewMap.transpose() * slewMap;
         gradient.head(C) +=
             2.0 * smoothScale * slewMap.transpose() * slewOffset;
+
+        // The base MPCC warm start is feasible for its own box/progress
+        // constraints, but it predates the contact-normal magnitude and slew
+        // rows below.  Active-set QP requires a feasible seed, so project each
+        // stage's scalar normal action into the frozen guard before adding the
+        // soft-constraint seeds.  This changes only the numerical seed, never
+        // the objective or feasible set.
+        const double heldSeedCommand = std::clamp(
+            previousCommand,
+            -_parameters.maximumRobotNormalCommand,
+            _parameters.maximumRobotNormalCommand);
+        for(int stage = 0; stage < N; ++stage)
+        {
+            const Eigen::RowVectorXd row = commandMap.row(stage);
+            const double requested = row.dot(seed.head(C));
+            const double normSquared = row.squaredNorm();
+            if(normSquared > 1e-18)
+            {
+                seed.head(C) += row.transpose()
+                    * ((heldSeedCommand - requested) / normSquared);
+            }
+        }
+        if((constraintMatrix * seed - constraintVector).maxCoeff() > 1e-9)
+        {
+            for(int stage = 0; stage < N; ++stage)
+                seed.segment(stage * context.stageControlDimension, 6).setZero();
+            for(int stage = 0; stage < N; ++stage)
+            {
+                const Eigen::RowVectorXd row = commandMap.row(stage);
+                const double normSquared = row.squaredNorm();
+                if(normSquared > 1e-18)
+                    seed.head(C) += row.transpose()
+                        * (heldSeedCommand / normSquared);
+            }
+        }
     }
     for(int stage = 0; stage < N; ++stage)
     {
@@ -261,17 +296,21 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
 
     const int oldRows = constraintMatrix.rows();
     const int actionRows = _parameters.normalActionGuardEnabled ? 4 * N : 0;
+    // Force and penetration bands are genuinely soft: each slack is
+    // constrained nonnegative but deliberately has no hard upper bound.
+    // A capped slack can make a model-validity guard infeasible precisely
+    // when its diagnostic violation is largest.
     Eigen::MatrixXd bounded = Eigen::MatrixXd::Zero(
-        oldRows + 8 * N + actionRows, V);
+        oldRows + 6 * N + actionRows, V);
     bounded.topRows(oldRows) = constraintMatrix;
     Eigen::VectorXd limits = Eigen::VectorXd::Zero(
-        oldRows + 8 * N + actionRows);
+        oldRows + 6 * N + actionRows);
     limits.head(oldRows) = constraintVector;
 
     for(int stage = 0; stage < N; ++stage)
     {
-        const int row = oldRows + 8 * stage;
-        const int actionRow = oldRows + 8 * N + 4 * stage;
+        const int row = oldRows + 6 * stage;
+        const int actionRow = oldRows + 6 * N + 4 * stage;
         const int forceSlack = C + stage;
         const int penetrationSlack = C + N + stage;
         const Eigen::RowVectorXd forceRow = _lastForceMap.row(stage);
@@ -289,52 +328,61 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
         limits(row + 1) = forceConstant - _parameters.minimumForce;
         bounded(row + 2, forceSlack) = -1.0;
         limits(row + 2) = 0.0;
-        bounded(row + 3, forceSlack) = 1.0;
-        limits(row + 3) = _parameters.maximumForceSlack;
-
         // The penetration slack decision is dimensionless:
         // sigma_rho = epsilon_rho / Delta_rho_max.  Scaling this block avoids
         // putting metre-scale coefficients beside O(1) force constraints and
         // a 1e12--1e16 SI penalty in the same active-set KKT system.
         const double rhoScale = _parameters.maximumPenetrationIncrement;
-        bounded.block(row + 4, 0, 1, C) = penetrationRow / rhoScale;
+        bounded.block(row + 3, 0, 1, C) = penetrationRow / rhoScale;
+        bounded(row + 3, penetrationSlack) = -1.0;
+        limits(row + 3) = 1.0 - penetrationConstant / rhoScale;
+        bounded.block(row + 4, 0, 1, C) = -penetrationRow / rhoScale;
         bounded(row + 4, penetrationSlack) = -1.0;
-        limits(row + 4) = 1.0 - penetrationConstant / rhoScale;
-        bounded.block(row + 5, 0, 1, C) = -penetrationRow / rhoScale;
+        limits(row + 4) = 1.0 + penetrationConstant / rhoScale;
         bounded(row + 5, penetrationSlack) = -1.0;
-        limits(row + 5) = 1.0 + penetrationConstant / rhoScale;
-        bounded(row + 6, penetrationSlack) = -1.0;
-        limits(row + 6) = 0.0;
-        bounded(row + 7, penetrationSlack) = 1.0;
-        limits(row + 7) = _parameters.maximumPenetrationSlack / rhoScale;
+        limits(row + 5) = 0.0;
 
         if(_parameters.normalActionGuardEnabled)
         {
-            bounded.block(actionRow, 0, 1, C) = commandMap.row(stage);
-            limits(actionRow) = _parameters.maximumRobotNormalCommand;
-            bounded.block(actionRow + 1, 0, 1, C) = -commandMap.row(stage);
-            limits(actionRow + 1) = _parameters.maximumRobotNormalCommand;
-            bounded.block(actionRow + 2, 0, 1, C) = slewMap.row(stage);
+            // Normalize both guards to O(0.1).  Their physical limits are
+            // 1e-4 and 1e-6 m/s, respectively; leaving those raw beside the
+            // force/penetration rows makes an otherwise identical feasible
+            // set poorly resolved by the frozen outer-QP tolerance.
+            const double commandScale =
+                10.0 * _parameters.maximumRobotNormalCommand;
+            const double slewScale =
+                10.0 * _parameters.maximumRobotNormalCommandStep;
+            bounded.block(actionRow, 0, 1, C) =
+                commandMap.row(stage) / commandScale;
+            limits(actionRow) =
+                _parameters.maximumRobotNormalCommand / commandScale;
+            bounded.block(actionRow + 1, 0, 1, C) =
+                -commandMap.row(stage) / commandScale;
+            limits(actionRow + 1) =
+                _parameters.maximumRobotNormalCommand / commandScale;
+            bounded.block(actionRow + 2, 0, 1, C) =
+                slewMap.row(stage) / slewScale;
             limits(actionRow + 2) =
-                _parameters.maximumRobotNormalCommandStep - slewOffset(stage);
-            bounded.block(actionRow + 3, 0, 1, C) = -slewMap.row(stage);
+                _parameters.maximumRobotNormalCommandStep / slewScale
+                - slewOffset(stage) / slewScale;
+            bounded.block(actionRow + 3, 0, 1, C) =
+                -slewMap.row(stage) / slewScale;
             limits(actionRow + 3) =
-                _parameters.maximumRobotNormalCommandStep + slewOffset(stage);
+                _parameters.maximumRobotNormalCommandStep / slewScale
+                + slewOffset(stage) / slewScale;
         }
 
         const double seededForce = forceConstant
             + forceRow.dot(seed.head(C));
-        seed(forceSlack) = std::clamp(std::max({
+        seed(forceSlack) = std::max({
             seed(forceSlack), 0.0,
             seededForce - _parameters.maximumForce,
-            _parameters.minimumForce - seededForce}),
-            0.0, _parameters.maximumForceSlack);
+            _parameters.minimumForce - seededForce});
         const double seededPenetration = penetrationConstant
             + penetrationRow.dot(seed.head(C));
-        seed(penetrationSlack) = std::clamp(std::max(
+        seed(penetrationSlack) = std::max(
             seed(penetrationSlack),
-            std::abs(seededPenetration) / rhoScale - 1.0),
-            0.0, _parameters.maximumPenetrationSlack / rhoScale);
+            std::max(0.0, std::abs(seededPenetration) / rhoScale - 1.0));
     }
     constraintMatrix = std::move(bounded);
     constraintVector = std::move(limits);

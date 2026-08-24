@@ -30,7 +30,8 @@ SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTre
 : SerialLinkVelocityBase(model, endpointName, parameters),
   _horizon((horizon == 0) ? 1 : horizon),
   _dt((dt > 0.0) ? dt : 1.0 / std::max(parameters.controlFrequency, 1u)),
-  _qpSolver(parameters.mpcc_qp_options())
+  _qpSolver(parameters.mpcc_qp_options()),
+  _qpStepSizeTolerance(parameters.mpcc_qp_options().stepSizeTolerance)
 {
     // The action-loop frequency is shared by all velocity controllers. The
     // prediction step follows it by default, but an explicit dt may still be
@@ -715,13 +716,52 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): QP returned an invalid solution.");
     }
-    const double constraintViolation =
+    double constraintViolation =
         (constraintMatrix * optimum - constraintVector).maxCoeff();
+    // The active-set stopping test is intentionally frozen at 1e-4 for the
+    // outer MPCC.  It can therefore terminate at the correct active face with
+    // an O(1e-6) floating-point half-space residual.  Restore feasibility only
+    // for residuals already inside that solver tolerance; larger violations
+    // remain hard failures and are never hidden by this numerical polish.
+    if(std::isfinite(constraintViolation)
+       && constraintViolation > 1e-9
+       && constraintViolation <= _qpStepSizeTolerance)
+    {
+        for(int sweep = 0; sweep < 20 && constraintViolation > 1e-9; ++sweep)
+        {
+            for(int row = 0; row < constraintMatrix.rows(); ++row)
+            {
+                const double residual =
+                    constraintMatrix.row(row).dot(optimum) - constraintVector(row);
+                const double normSquared = constraintMatrix.row(row).squaredNorm();
+                if(residual > 1e-10 && normSquared > 1e-20)
+                {
+                    optimum -= constraintMatrix.row(row).transpose()
+                        * ((residual + 1e-10) / normSquared);
+                }
+            }
+            constraintViolation =
+                (constraintMatrix * optimum - constraintVector).maxCoeff();
+        }
+        _diagnostics.qpObjective = 0.5 * optimum.dot(H * optimum) + f.dot(optimum);
+    }
     if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
     {
+        const Eigen::VectorXd seedResidual =
+            constraintMatrix * seed - constraintVector;
+        Eigen::Index seedViolationRow = -1;
+        const double seedViolation = seedResidual.maxCoeff(&seedViolationRow);
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): QP returned an infeasible solution (maximum violation "
-            + std::to_string(constraintViolation) + ").");
+            + std::to_string(constraintViolation)
+            + ", seed violation " + std::to_string(seedViolation)
+            + " at row " + std::to_string(seedViolationRow)
+            + " (lhs "
+            + std::to_string(constraintMatrix.row(seedViolationRow).dot(seed))
+            + ", rhs " + std::to_string(constraintVector(seedViolationRow)) + ")"
+            + ", iterations " + std::to_string(qpResults.numberOfSteps)
+            + ", final step " + std::to_string(qpResults.finalStepSize)
+            + ", solution norm " + std::to_string(optimum.norm()) + ").");
     }
     _diagnostics.qpStatus = 1.0;
     _diagnostics.stageControlDimension = stageControlDim;

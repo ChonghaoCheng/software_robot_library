@@ -674,8 +674,12 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
     {
         DataType distance = z(i) - B.row(i).dot(x);
         
-        if (distance <= 0.0)   activeSet.push_back(i);
-        else                 inactiveSet.push_back(i);
+        // A feasible boundary row is not an initial violation. Treating every
+        // zero-slack row as active can make the initial projection singular
+        // when soft-slack lower bounds or duplicated guards are redundant.
+        // Such rows are still discovered normally as blocking constraints.
+        if (distance < -1e-10) activeSet.push_back(i);
+        else                   inactiveSet.push_back(i);
     }
     
     if (activeSet.size() > dim)
@@ -696,7 +700,19 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         zsub(i) = z(activeSet[i]);
     }
     
-    x +=  Bsub.transpose() * (Bsub * Bsub.transpose()).ldlt().solve(zsub - Bsub * x);               // Shift the start point
+    if(Bsub.rows() > 0)
+    {
+        const Matrix<DataType, Dynamic, Dynamic> gram = Bsub * Bsub.transpose();
+        const Vector<DataType, Dynamic> rhs = zsub - Bsub * x;
+        Vector<DataType, Dynamic> correction = gram.ldlt().solve(rhs);
+        if(not correction.allFinite()
+           or (gram * correction - rhs).norm()
+                > 1e-10 * (1.0 + rhs.norm()))
+        {
+            correction = gram.completeOrthogonalDecomposition().solve(rhs);
+        }
+        x += Bsub.transpose() * correction;                                                        // Shift the start point
+    }
     
     // Run the active set method
     for (int i = 0; i < _options.maxSteps; ++i)
@@ -721,7 +737,15 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         
         Matrix<DataType, Dynamic, Dynamic> invHCt = Hdecomp.solve(C.transpose());                   // Inverse of Hessian * constraint matrix (transposed)
             
-        lambda = (C * invHCt).ldlt().solve(C * invHg);                                              // Lagrange multipliers
+        const Matrix<DataType, Dynamic, Dynamic> schur = C * invHCt;
+        const Vector<DataType, Dynamic> schurRhs = C * invHg;
+        lambda = schur.ldlt().solve(schurRhs);                                                       // Lagrange multipliers
+        if(not lambda.allFinite()
+           or (schur * lambda - schurRhs).norm()
+                > 1e-10 * (1.0 + schurRhs.norm()))
+        {
+            lambda = schur.completeOrthogonalDecomposition().solve(schurRhs);
+        }
             
         dx = invHCt * lambda - invHg;                                                               // Constrained step
         
@@ -767,7 +791,9 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                 // Check to see if we are moving toward a currently inactive constraint
                 if (addedDistance > 0.0)
                 {
-                    double ratio = (z(index) - B.row(index).dot(x)) / addedDistance;                // Current distance / added distance
+                    double ratio = std::max<DataType>(
+                        0.0,
+                        (z(index) - B.row(index).dot(x)) / addedDistance);                           // Current distance / added distance
                     
                     if (ratio < alpha)
                     {

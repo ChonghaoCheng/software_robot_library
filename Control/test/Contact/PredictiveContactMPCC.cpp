@@ -389,6 +389,22 @@ int main()
         check(slew.size() == 3 && slew.cwiseAbs().maxCoeff()
                   <= parameters.maximumRobotNormalCommandStep + 1e-10,
               "robot-normal command slew constraints hold");
+        // Repeat from distinct trajectory times so an infeasible Basic warm
+        // start cannot leak through the added action constraints.
+        for(int index = 1; index <= 20; ++index)
+        {
+            controller.set_force_measurement(2.5, true);
+            controller.set_normal_realization_state(
+                0.0, std::vector<double>(4, 0.0));
+            const Eigen::VectorXd command = controller.step_at_time(
+                0.002 * index, 0.002);
+            const auto &base = controller.diagnostics();
+            const double violation =
+                (base.qpConstraintMatrix * base.optimalHorizon
+                 - base.qpConstraintVector).maxCoeff();
+            check(command.allFinite() && violation <= 1e-6,
+                  "contact action guard keeps repeated active-QP seeds feasible");
+        }
     }
 
     {

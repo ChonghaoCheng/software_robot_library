@@ -378,6 +378,7 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         Eigen::VectorXd _warmStart;
 
         QPSolver<double> _qpSolver;
+        double _qpStepSizeTolerance = 1e-5;
         MpccDiagnostics _diagnostics;
 
         Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION>

@@ -97,17 +97,20 @@ int main()
     options.maxSteps = 50;
     QPSolver<double> solver(options);
     bool oldRepresentationFailed = false;
+    Eigen::Vector3d oldRepresentationSolution = x0;
     try
     {
-        (void)solver.solve(H, f, oldB, oldZ, x0);
+        oldRepresentationSolution = solver.solve(H, f, oldB, oldZ, x0);
     }
     catch(const std::invalid_argument &)
     {
         oldRepresentationFailed = true;
     }
-    if(not oldRepresentationFailed)
+    if(oldRepresentationFailed
+       or not oldRepresentationSolution.allFinite()
+       or (oldB * oldRepresentationSolution - oldZ).maxCoeff() >= 1e-9)
     {
-        std::cerr << "Reduced paired-inequality regression no longer reproduces failure.\n";
+        std::cerr << "Reduced paired-inequality regression was not resolved.\n";
         return 6;
     }
 

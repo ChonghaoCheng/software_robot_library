@@ -104,6 +104,22 @@ bool releases_initially_active_constraint()
     return std::abs(x(0)) <= 1e-8 && check_kkt(H, f, B, z, x, 1e-8);
 }
 
+bool redundant_boundary_seed_is_well_posed()
+{
+    Eigen::Matrix2d H = Eigen::Matrix2d::Identity();
+    Eigen::Vector2d f(-1.0, 0.0);
+    Eigen::Matrix<double, 4, 2> B;
+    B << 1.0, 0.0,
+         1.0, 0.0,
+         0.0,-1.0,
+         0.0,-1.0;
+    Eigen::Vector4d z = Eigen::Vector4d::Zero();
+    const Eigen::Vector2d x = solver().solve(
+        H, f, B, z, Eigen::Vector2d::Zero());
+    return x.allFinite() && near(x, Eigen::Vector2d::Zero(), 1e-8)
+        && (B*x-z).maxCoeff() <= 1e-8;
+}
+
 bool random_box_qps()
 {
     std::mt19937 rng(7);
@@ -156,6 +172,7 @@ int main()
     if(!unconstrained_pd_qp()) return 1;
     if(!active_bound_optimum()) return 2;
     if(!releases_initially_active_constraint()) return 3;
-    if(!random_box_qps()) return 4;
+    if(!redundant_boundary_seed_is_well_posed()) return 4;
+    if(!random_box_qps()) return 5;
     return 0;
 }
