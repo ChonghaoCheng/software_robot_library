@@ -22,6 +22,8 @@
 #include <Math/QPSolver.h>
 
 #include <Eigen/Core>                                                                               // Eigen::Matrix
+#include <cmath>
+#include <limits>
 
 namespace RobotLibrary { namespace Control {
 /**
@@ -56,6 +58,26 @@ struct SerialLinkParameters
     std::vector<double> jointVelocityGains;
                                                                           
     SolverOptions<double> qpsolver = SolverOptions<double>();                                       ///< Parameters for the underlying QP solver
+
+    /** Optional per-layer absolute active-set tolerances. NaN preserves the legacy shared value. */
+    double resolvedRateQpStepSizeTolerance = std::numeric_limits<double>::quiet_NaN();
+    double mpccQpStepSizeTolerance = std::numeric_limits<double>::quiet_NaN();
+
+    SolverOptions<double> resolved_rate_qp_options() const
+    {
+        SolverOptions<double> result = qpsolver;
+        if(std::isfinite(resolvedRateQpStepSizeTolerance))
+            result.stepSizeTolerance = resolvedRateQpStepSizeTolerance;
+        return result;
+    }
+
+    SolverOptions<double> mpcc_qp_options() const
+    {
+        SolverOptions<double> result = qpsolver;
+        if(std::isfinite(mpccQpStepSizeTolerance))
+            result.stepSizeTolerance = mpccQpStepSizeTolerance;
+        return result;
+    }
 };
 
 /**

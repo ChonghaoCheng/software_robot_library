@@ -30,7 +30,7 @@ SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTre
 : SerialLinkVelocityBase(model, endpointName, parameters),
   _horizon((horizon == 0) ? 1 : horizon),
   _dt((dt > 0.0) ? dt : 1.0 / std::max(parameters.controlFrequency, 1u)),
-  _qpSolver(parameters.qpsolver)
+  _qpSolver(parameters.mpcc_qp_options())
 {
     // The action-loop frequency is shared by all velocity controllers. The
     // prediction step follows it by default, but an explicit dt may still be
@@ -696,6 +696,11 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             "[ERROR] [SERIAL LINK MPCC] extend_qp_problem(): inconsistent augmented QP.");
     }
     H = 0.5 * (H + H.transpose());
+    _diagnostics.qpHessian = H;
+    _diagnostics.qpGradient = f;
+    _diagnostics.qpConstraintMatrix = constraintMatrix;
+    _diagnostics.qpConstraintVector = constraintVector;
+    _diagnostics.qpSeed = seed;
     _diagnostics.qpStatus = 0.0;
     const auto solveStart = std::chrono::steady_clock::now();
     VectorXd optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);

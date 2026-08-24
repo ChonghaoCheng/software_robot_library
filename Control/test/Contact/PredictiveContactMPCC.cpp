@@ -2,6 +2,7 @@
 
 #include <Control/Contact/PredictiveContactModel.h>
 #include <Control/Contact/SerialLinkPredictiveContactMPCC.h>
+#include <Control/TrajectoryTracking/SerialLinkKinematic.h>
 #include <Math/MathFunctions.h>
 #include <Model/KinematicTree.h>
 #include <Trajectory/CartesianSpline.h>
@@ -159,6 +160,19 @@ void set_path(Controller &controller)
     const Pose pose = controller.endpoint_pose();
     controller.set_trajectory(CartesianSpline(
         pose, pose, Eigen::Vector<double,6>::Zero(), 0.0, 1.0));
+    CartesianTrajectoryFrameState frame;
+    frame.transformInBase = Eigen::Matrix4d::Identity();
+    controller.set_trajectory_frame(frame, 0.0);
+}
+
+template<class Controller>
+void set_moving_path(Controller &controller)
+{
+    const Pose start = controller.endpoint_pose();
+    const Pose end(start.translation() + Eigen::Vector3d(0.02, 0.0, 0.0),
+                   start.quaternion());
+    controller.set_trajectory(CartesianSpline(
+        start, end, Eigen::Vector<double,6>::Zero(), 0.0, 2.0));
     CartesianTrajectoryFrameState frame;
     frame.transformInBase = Eigen::Matrix4d::Identity();
     controller.set_trajectory_frame(frame, 0.0);
@@ -359,6 +373,86 @@ int main()
         try { (void)controller.step_at_time(0.004, 0.003); }
         catch(const std::invalid_argument &) { threw = true; }
         check(threw, "identified/control dt mismatch fails loudly");
+    }
+
+    // E06-Q: the legacy absolute tolerance suppresses small resolved-rate
+    // commands, while a layer-specific tolerance recovers the high-accuracy
+    // solution without violating constraints or destabilizing the damped branch.
+    {
+        Eigen::Vector<double,6> request = Eigen::Vector<double,6>::Zero();
+        request(0) = 5e-5;
+        SerialLinkParameters legacyParameters;
+        legacyParameters.qpsolver.stepSizeTolerance = 5e-2;
+        legacyParameters.qpsolver.maxSteps = 100;
+        auto legacyModel = make_model(fixture.path);
+        RobotLibrary::Control::SerialLinkKinematic legacy(
+            legacyModel, "tool", legacyParameters);
+        const Eigen::VectorXd legacyCommand = legacy.resolve_endpoint_twist(request);
+        check(legacyCommand.norm() == 0.0,
+              "legacy 0.05 tolerance reproduces the small-signal resolver dead zone");
+
+        SerialLinkParameters selectedParameters = legacyParameters;
+        selectedParameters.resolvedRateQpStepSizeTolerance = 1e-6;
+        selectedParameters.mpccQpStepSizeTolerance = 1e-4;
+        check(selectedParameters.resolved_rate_qp_options().stepSizeTolerance == 1e-6
+              && selectedParameters.mpcc_qp_options().stepSizeTolerance == 1e-4
+              && selectedParameters.qpsolver.stepSizeTolerance == 5e-2,
+              "split resolver/MPCC tolerances preserve the legacy fallback value");
+        auto selectedModel = make_model(fixture.path);
+        RobotLibrary::Control::SerialLinkKinematic selected(
+            selectedModel, "tool", selectedParameters);
+        const Eigen::VectorXd selectedCommand = selected.resolve_endpoint_twist(request);
+        const Eigen::Vector<double,6> selectedTwist =
+            selectedModel->jacobian(selectedModel->find_frame("tool")) * selectedCommand;
+        check((selectedTwist - request).norm() / request.norm() <= 0.02,
+              "selected resolver tolerance reproduces a 0.05 mm/s request within 2 percent");
+
+        SerialLinkParameters referenceParameters = selectedParameters;
+        referenceParameters.resolvedRateQpStepSizeTolerance = 1e-8;
+        auto referenceModel = make_model(fixture.path);
+        RobotLibrary::Control::SerialLinkKinematic reference(
+            referenceModel, "tool", referenceParameters);
+        const Eigen::VectorXd referenceCommand = reference.resolve_endpoint_twist(request);
+        check((selectedCommand - referenceCommand).norm() <= 1e-10,
+              "selected resolver solution matches the high-accuracy reference");
+
+        SerialLinkParameters singularParameters = selectedParameters;
+        singularParameters.minManipulability = 1.0;
+        auto singularModel = make_model(fixture.path);
+        RobotLibrary::Control::SerialLinkKinematic singular(
+            singularModel, "tool", singularParameters);
+        check(singular.resolve_endpoint_twist(request).allFinite(),
+              "selected tolerance leaves the damped singular branch finite");
+    }
+
+    // The selected outer tolerance converges to the same physical first command
+    // as 1e-8, and its frozen condensed inequalities remain satisfied.
+    {
+        SerialLinkParameters selectedParameters;
+        selectedParameters.qpsolver.stepSizeTolerance = 5e-2;
+        selectedParameters.mpccQpStepSizeTolerance = 1e-4;
+        selectedParameters.qpsolver.maxSteps = 100;
+        SerialLinkParameters referenceParameters = selectedParameters;
+        referenceParameters.mpccQpStepSizeTolerance = 1e-8;
+        auto selectedModel = make_model(fixture.path);
+        auto referenceModel = make_model(fixture.path);
+        SerialLinkMPCC selected(
+            selectedModel, "tool", selectedParameters, 12, 0.002);
+        SerialLinkMPCC reference(
+            referenceModel, "tool", referenceParameters, 12, 0.002);
+        set_moving_path(selected);
+        set_moving_path(reference);
+        (void)selected.step_at_time(0.0, 0.002);
+        (void)reference.step_at_time(0.0, 0.002);
+        const auto &selectedDiagnostics = selected.diagnostics();
+        const auto &referenceDiagnostics = reference.diagnostics();
+        check((selectedDiagnostics.optimalHorizon.head<3>()
+               - referenceDiagnostics.optimalHorizon.head<3>()).norm() <= 1e-6,
+              "selected MPCC tolerance converges within 1 um/s of reference");
+        check((selectedDiagnostics.qpConstraintMatrix
+               * selectedDiagnostics.optimalHorizon
+               - selectedDiagnostics.qpConstraintVector).maxCoeff() <= 1e-8,
+              "selected MPCC solution satisfies frozen inequalities");
     }
 
     if(failures == 0)

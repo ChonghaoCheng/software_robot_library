@@ -102,6 +102,12 @@ struct MpccDiagnostics
     double parentMeasurementAgeSeconds = 0.0;
     int stageControlDimension = 7;
     Eigen::VectorXd optimalHorizon;
+    /** Exact frozen condensed QP used by the most recent solve (diagnostic only). */
+    Eigen::MatrixXd qpHessian;
+    Eigen::VectorXd qpGradient;
+    Eigen::MatrixXd qpConstraintMatrix;
+    Eigen::VectorXd qpConstraintVector;
+    Eigen::VectorXd qpSeed;
     Eigen::VectorXd shiftedWarmStart;
 };
 

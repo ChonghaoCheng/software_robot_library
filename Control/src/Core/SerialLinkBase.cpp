@@ -30,7 +30,7 @@ namespace RobotLibrary { namespace Control {
 SerialLinkBase::SerialLinkBase(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
                                const std::string &endpointName,
                                const RobotLibrary::Control::SerialLinkParameters &parameters)
-: QPSolver<double>(parameters.qpsolver)
+: QPSolver<double>(parameters.resolved_rate_qp_options())
 {
      _model = model;                                                                                // Save model internally so we can access it later
 

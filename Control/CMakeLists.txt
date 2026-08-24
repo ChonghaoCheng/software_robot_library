@@ -67,6 +67,11 @@ if(BUILD_TESTING)
     add_control_test(predictive_contact_mpcc_test test/Contact/PredictiveContactMPCC.cpp)
     add_control_test(contact_closed_loop_test test/Contact/ContactClosedLoop.cpp)
 
+    # E06-Q deterministic tolerance sweep. Formal execution supplies the
+    # production URDF and evidence directory, so it is intentionally not CTest.
+    add_executable(qp_resolution_audit test/Contact/QpResolutionAudit.cpp)
+    target_link_libraries(qp_resolution_audit PRIVATE Control)
+
     # Offline N125-QP diagnostic utility. It is intentionally not a CTest
     # because it requires an explicitly supplied, non-committed snapshot.
     add_executable(n125_qp_active_set_replay
