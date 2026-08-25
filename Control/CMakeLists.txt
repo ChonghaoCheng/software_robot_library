@@ -76,6 +76,12 @@ if(BUILD_TESTING)
     add_executable(e07_r0_qp_replay test/Contact/E07R0QpReplay.cpp)
     target_link_libraries(e07_r0_qp_replay PRIVATE Control)
 
+    # E07-R4 full controller-QP snapshot builder.  It reconstructs a recorded
+    # planar-contact state and writes the frozen QP before any offline solve.
+    add_executable(e07_r4_horizon_snapshot
+        test/Contact/E07R4HorizonSnapshot.cpp)
+    target_link_libraries(e07_r4_horizon_snapshot PRIVATE Control)
+
     # Offline N125-QP diagnostic utility. It is intentionally not a CTest
     # because it requires an explicitly supplied, non-committed snapshot.
     add_executable(n125_qp_active_set_replay
