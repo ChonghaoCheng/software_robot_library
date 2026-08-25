@@ -169,6 +169,7 @@ int main(int argc, char **argv)
         Eigen::VectorXd solution = solver.solve(H, f, B, z, seed);
         const auto raw = solver.results();
         const double rawViolation = (B * solution - z).maxCoeff();
+        write_vector(output.string() + ".raw_solution.csv", solution);
         polish(solution, B, z, tolerance);
         const double violation = (B * solution - z).maxCoeff();
         const double objective = 0.5 * solution.dot(H * solution) + f.dot(solution);
