@@ -711,6 +711,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
     _diagnostics.qpObjective = qpResults.objectiveFunction;
+    _diagnostics.qpReturnedSolution = optimum;
     if(optimum.size() != H.rows() or not optimum.allFinite())
     {
         throw std::runtime_error(
@@ -718,6 +719,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     }
     double constraintViolation =
         (constraintMatrix * optimum - constraintVector).maxCoeff();
+    _diagnostics.qpMaximumConstraintViolation = constraintViolation;
     // The active-set stopping test is intentionally frozen at 1e-4 for the
     // outer MPCC.  It can therefore terminate at the correct active face with
     // an O(1e-6) floating-point half-space residual.  Restore feasibility only
@@ -742,6 +744,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             }
             constraintViolation =
                 (constraintMatrix * optimum - constraintVector).maxCoeff();
+            _diagnostics.qpMaximumConstraintViolation = constraintViolation;
         }
         _diagnostics.qpObjective = 0.5 * optimum.dot(H * optimum) + f.dot(optimum);
     }

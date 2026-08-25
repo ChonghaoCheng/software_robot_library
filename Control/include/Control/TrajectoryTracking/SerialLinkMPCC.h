@@ -87,6 +87,7 @@ struct MpccDiagnostics
     double qpStatus = 1.0;
     double qpIterations = 0.0;
     double qpFinalStepSize = 0.0;
+    double qpMaximumConstraintViolation = 0.0;
     double qpObjective = 0.0;
     double qpSolveTimeSeconds = 0.0;
     double twistRealizationError = 0.0;
@@ -108,6 +109,8 @@ struct MpccDiagnostics
     Eigen::MatrixXd qpConstraintMatrix;
     Eigen::VectorXd qpConstraintVector;
     Eigen::VectorXd qpSeed;
+    /** Last vector returned by the QP solver, including a failing solve. */
+    Eigen::VectorXd qpReturnedSolution;
     Eigen::VectorXd shiftedWarmStart;
 };
 

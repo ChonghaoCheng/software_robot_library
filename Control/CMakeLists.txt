@@ -72,6 +72,10 @@ if(BUILD_TESTING)
     add_executable(qp_resolution_audit test/Contact/QpResolutionAudit.cpp)
     target_link_libraries(qp_resolution_audit PRIVATE Control)
 
+    # E07-R1 exact frozen predictive-QP replay utility (requires snapshot args).
+    add_executable(e07_r0_qp_replay test/Contact/E07R0QpReplay.cpp)
+    target_link_libraries(e07_r0_qp_replay PRIVATE Control)
+
     # Offline N125-QP diagnostic utility. It is intentionally not a CTest
     # because it requires an explicitly supplied, non-committed snapshot.
     add_executable(n125_qp_active_set_replay
