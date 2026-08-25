@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -57,6 +58,12 @@ void write_vector(const std::filesystem::path &path, const Eigen::VectorXd &x)
 
 std::vector<int> group_rows(const std::string &group, int dimension, int horizon)
 {
+    if(group == "ALL_ROWS")
+    {
+        std::vector<int> all;
+        for(int row = 0; row < dimension; ++row) all.push_back(row);
+        return all;
+    }
     const int baseRows = 2 * (7 * horizon) + 1;
     std::vector<int> rows;
     for(int row = 0; row < baseRows; ++row) rows.push_back(row);
@@ -73,8 +80,30 @@ std::vector<int> group_rows(const std::string &group, int dimension, int horizon
     for(int stage = 0; stage < horizon; ++stage)
         for(int local = 3; local < 6; ++local)
             rows.push_back(baseRows + 6 * stage + local);
-    if(group != "Q4" and group != "FULL")
+    if(group != "Q4" and group != "FULL"
+       and group != "FULL_NO_NORMAL_GUARD"
+       and group != "FULL_NO_SLEW"
+       and group != "FULL_NO_MAGNITUDE")
         throw std::invalid_argument("Unknown group " + group);
+    if(group == "FULL_NO_NORMAL_GUARD" or group == "FULL_NO_SLEW"
+       or group == "FULL_NO_MAGNITUDE")
+    {
+        const int magnitudeBegin = actionStart;
+        std::vector<int> filtered;
+        filtered.reserve(rows.size());
+        for(const int row : rows)
+        {
+            if(row < magnitudeBegin) { filtered.push_back(row); continue; }
+            const int local = (row - magnitudeBegin) % 4;
+            const bool magnitude = local < 2;
+            const bool slew = local >= 2;
+            if(group == "FULL_NO_NORMAL_GUARD") continue;
+            if(group == "FULL_NO_SLEW" and slew) continue;
+            if(group == "FULL_NO_MAGNITUDE" and magnitude) continue;
+            filtered.push_back(row);
+        }
+        rows = std::move(filtered);
+    }
     for(const int row : rows)
         if(row < 0 or row >= dimension)
             throw std::runtime_error("Constraint group row out of range");
@@ -166,9 +195,16 @@ int main(int argc, char **argv)
         options.stepSizeTolerance = tolerance;
         options.maxSteps = maxSteps;
         QPSolver<double> solver(options);
+        const auto start = std::chrono::steady_clock::now();
         Eigen::VectorXd solution = solver.solve(H, f, B, z, seed);
+        const auto stop = std::chrono::steady_clock::now();
+        const double solveTimeMs = std::chrono::duration<double, std::milli>(
+            stop - start).count();
         const auto raw = solver.results();
         const double rawViolation = (B * solution - z).maxCoeff();
+        Eigen::Index largestRawRow = 0;
+        (B * solution - z).maxCoeff(&largestRawRow);
+        const double rawObjective = 0.5 * solution.dot(H * solution) + f.dot(solution);
         write_vector(output.string() + ".raw_solution.csv", solution);
         polish(solution, B, z, tolerance);
         const double violation = (B * solution - z).maxCoeff();
@@ -187,7 +223,11 @@ int main(int argc, char **argv)
              << "  \"max_steps\": " << maxSteps << ",\n"
              << "  \"iterations\": " << raw.numberOfSteps << ",\n"
              << "  \"final_step_size\": " << raw.finalStepSize << ",\n"
+             << "  \"solve_time_ms\": " << solveTimeMs << ",\n"
              << "  \"raw_max_violation\": " << rawViolation << ",\n"
+             << "  \"raw_largest_violating_row\": "
+             << selected[static_cast<size_t>(largestRawRow)] << ",\n"
+             << "  \"raw_objective\": " << rawObjective << ",\n"
              << "  \"polished_max_violation\": " << violation << ",\n"
              << "  \"objective\": " << objective << ",\n"
              << "  \"seed_max_violation\": " << (B * seed - z).maxCoeff() << ",\n"
