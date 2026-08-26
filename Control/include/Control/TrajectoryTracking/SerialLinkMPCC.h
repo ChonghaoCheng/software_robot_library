@@ -85,6 +85,7 @@ struct MpccDiagnostics
     double positionError = 0.0;
     double orientationError = 0.0;
     double qpStatus = 1.0;
+    bool qpConverged = false;
     double qpIterations = 0.0;
     double qpFinalStepSize = 0.0;
     double qpMaximumConstraintViolation = 0.0;

@@ -122,6 +122,7 @@ struct ContactMpcDiagnostics
 {
     bool contactModeActive = false;
     bool solverSucceeded = false;
+    bool qpConverged = false;                      ///< Raw QP convergence; does not alter solverSucceeded.
     bool fallbackUsed = false;
     double measuredNormalForce = 0.0;          ///< Positive compression [N].
     double currentSignedNormalCoordinate = 0.0;

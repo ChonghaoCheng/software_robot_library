@@ -221,6 +221,7 @@ int main(int argc, char **argv)
              << "  \"group\": \"" << group << "\",\n"
              << "  \"tolerance\": " << tolerance << ",\n"
              << "  \"max_steps\": " << maxSteps << ",\n"
+             << "  \"converged\": " << (raw.converged ? "true" : "false") << ",\n"
              << "  \"iterations\": " << raw.numberOfSteps << ",\n"
              << "  \"final_step_size\": " << raw.finalStepSize << ",\n"
              << "  \"solve_time_ms\": " << solveTimeMs << ",\n"

@@ -39,6 +39,7 @@ struct SolverOptions
 template <typename DataType = float>
 struct SolverResults
 {
+    bool converged = false;                                                                         ///< True only when the selected algorithm reaches its convergence exit
     unsigned int numberOfSteps = 1;                                                                 ///< Number of steps it took to find a solution
     DataType finalStepSize     = std::numeric_limits<float>::max();                                 ///< The final step size at which the algorithm terminated
     DataType objectiveFunction = std::numeric_limits<float>::max();                                 ///< The magnitude of the error for the problem
@@ -641,6 +642,8 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
 {
     using namespace Eigen;                                                                          // For brevity of code
 
+    _results.converged = false;
+
     LDLT<Matrix<DataType, Dynamic, Dynamic>> Hdecomp = H.ldlt();                                    // LDLT decomposition of Hessian matrix
  
     if (Hdecomp.info() != Eigen::Success)
@@ -774,7 +777,11 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                 inactiveSet.push_back(activeSet[freeConstraint]);                                   
                 activeSet.erase(activeSet.begin() + freeConstraint);
             }
-            else break;                                                                             // Optimal solution found
+            else
+            {
+                _results.converged = true;
+                break;                                                                              // Optimal solution found
+            }
         }
         else
         {
@@ -844,6 +851,8 @@ QPSolver<DataType>::interior_point(const Eigen::Matrix<DataType, Eigen::Dynamic,
                                    const Eigen::Vector<DataType, Eigen::Dynamic> &x0)
 {
     using namespace Eigen;
+
+    _results.converged = false;
     
   // std::cout << "Starting the interior point method.\n";
     
@@ -966,7 +975,11 @@ QPSolver<DataType>::interior_point(const Eigen::Matrix<DataType, Eigen::Dynamic,
         
         stepSize = dx.norm();                                                                       // Save the norm
         
-        if (stepSize <= _options.stepSizeTolerance) break;                                          // Optimal solution found
+        if (stepSize <= _options.stepSizeTolerance)
+        {
+            _results.converged = true;
+            break;                                                                                  // Optimal solution found
+        }
         
         // Increment values for next loop
         x += dx;

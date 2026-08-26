@@ -120,6 +120,79 @@ bool redundant_boundary_seed_is_well_posed()
         && (B*x-z).maxCoeff() <= 1e-8;
 }
 
+void active_bound_problem(Eigen::Matrix2d &H,
+                          Eigen::Vector2d &f,
+                          Eigen::Matrix<double, 1, 2> &B,
+                          Eigen::Vector<double, 1> &z,
+                          Eigen::Vector2d &x0)
+{
+    H.setIdentity();
+    f << -2.0, 0.5;
+    B << 1.0, 0.0;
+    z << 0.25;
+    x0.setZero();
+}
+
+bool truncated_but_feasible_contract()
+{
+    Eigen::Matrix2d H;
+    Eigen::Vector2d f, x0;
+    Eigen::Matrix<double, 1, 2> B;
+    Eigen::Vector<double, 1> z;
+    active_bound_problem(H, f, B, z, x0);
+    SolverOptions<double> options;
+    options.method = "active set";
+    options.stepSizeTolerance = 1e-10;
+    options.maxSteps = 1;
+    QPSolver<double> qp(options);
+    const Eigen::Vector2d x = qp.solve(H, f, B, z, x0);
+    const auto result = qp.results();
+    return x.allFinite() && (B*x-z).maxCoeff() <= 1e-12
+        && !result.converged && result.numberOfSteps == options.maxSteps;
+}
+
+bool genuine_convergence_contract()
+{
+    Eigen::Matrix2d H;
+    Eigen::Vector2d f, x0;
+    Eigen::Matrix<double, 1, 2> B;
+    Eigen::Vector<double, 1> z;
+    active_bound_problem(H, f, B, z, x0);
+    QPSolver<double> qp = solver();
+    const Eigen::Vector2d x = qp.solve(H, f, B, z, x0);
+    const Eigen::Vector2d expected(0.25, -0.5);
+    return qp.results().converged && near(x, expected, 1e-10);
+}
+
+bool convergence_state_does_not_leak()
+{
+    SolverOptions<double> options;
+    options.method = "active set";
+    options.stepSizeTolerance = 1e-10;
+    options.maxSteps = 2;
+    QPSolver<double> qp(options);
+
+    Eigen::Matrix<double, 1, 1> easyH;
+    Eigen::Vector<double, 1> easyF, easyX0;
+    Eigen::Matrix<double, 0, 1> easyB;
+    Eigen::Vector<double, 0> easyZ;
+    easyH << 1.0;
+    easyF << -1.0;
+    easyX0 << 0.0;
+    (void)qp.solve(easyH, easyF, easyB, easyZ, easyX0);
+    if(!qp.results().converged) return false;
+
+    Eigen::Matrix2d H;
+    Eigen::Vector2d f, x0;
+    Eigen::Matrix<double, 1, 2> B;
+    Eigen::Vector<double, 1> z;
+    active_bound_problem(H, f, B, z, x0);
+    const Eigen::Vector2d x = qp.solve(H, f, B, z, x0);
+    return x.allFinite() && (B*x-z).maxCoeff() <= 1e-12
+        && !qp.results().converged
+        && qp.results().numberOfSteps == options.maxSteps;
+}
+
 bool random_box_qps()
 {
     std::mt19937 rng(7);
@@ -173,6 +246,9 @@ int main()
     if(!active_bound_optimum()) return 2;
     if(!releases_initially_active_constraint()) return 3;
     if(!redundant_boundary_seed_is_well_posed()) return 4;
-    if(!random_box_qps()) return 5;
+    if(!truncated_but_feasible_contract()) return 5;
+    if(!genuine_convergence_contract()) return 6;
+    if(!convergence_state_does_not_leak()) return 7;
+    if(!random_box_qps()) return 8;
     return 0;
 }

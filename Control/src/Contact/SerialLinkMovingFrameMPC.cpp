@@ -500,6 +500,7 @@ SerialLinkMovingFrameMPC::solve_contact_mpc(const Eigen::Matrix<double,6,1> &x0,
         QPSolver<double> solver(options);
 
         const VectorXd solution = solver.solve(H, g, inequalities, bound, _contactWarmStart);
+        _contactDiagnostics.qpConverged = solver.results().converged;
 
         const bool feasible = solution.size() == V && solution.allFinite()
             && (inequalities * solution - bound).maxCoeff() <= 1e-7;

@@ -224,6 +224,7 @@ struct RmpccDiagnostics
     double externalLinearSaturationActive = 0.0;
     double externalAngularSaturationActive = 0.0;
     double qpStatus              = 1.0;  ///< 1 for a completed step; solver failures throw
+    bool qpConverged             = false;///< Raw active-set convergence contract; diagnostic only
     bool   fallbackUsed          = false;///< Compatibility field; strict RMPCC never executes a fallback
     bool parentFrameMotionActive = false;
     Eigen::Vector<double,6> parentFrameBodyTwist = Eigen::Vector<double,6>::Zero();

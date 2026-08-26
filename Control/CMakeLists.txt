@@ -75,6 +75,8 @@ if(BUILD_TESTING)
     # E07-R1 exact frozen predictive-QP replay utility (requires snapshot args).
     add_executable(e07_r0_qp_replay test/Contact/E07R0QpReplay.cpp)
     target_link_libraries(e07_r0_qp_replay PRIVATE Control)
+    add_executable(e07_s1c_h13_exposure test/Contact/E07S1CH13Exposure.cpp)
+    target_link_libraries(e07_s1c_h13_exposure PRIVATE Control)
 
     # E07-R4 full controller-QP snapshot builder.  It reconstructs a recorded
     # planar-contact state and writes the frozen QP before any offline solve.

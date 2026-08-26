@@ -708,6 +708,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - solveStart).count();
     const SolverResults<double> qpResults = _qpSolver.results();
+    _diagnostics.qpConverged = qpResults.converged;
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
     _diagnostics.qpObjective = qpResults.objectiveFunction;

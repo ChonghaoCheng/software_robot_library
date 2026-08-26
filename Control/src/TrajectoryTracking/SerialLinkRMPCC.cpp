@@ -1381,6 +1381,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         : _qpSolver.solve(H, f, Bineq, zineq, zNominal);
     _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - solveStart).count();
+    _diagnostics.qpConverged = _qpSolver.results().converged;
     if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
         throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");
