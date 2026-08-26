@@ -225,8 +225,12 @@ SerialLinkContactMPCC::extend_qp_problem(
             0.0,
             seededForce - (_contactParameters.targetForce + _contactParameters.forceTolerance),
             (_contactParameters.targetForce - _contactParameters.forceTolerance) - seededForce});
+        // Seeding the exact minimum leaves the band row tight, which costs the
+        // active-set solver a zero-progress iteration per stage. A small
+        // interior margin starts strictly inside the band instead.
+        const double interiorSlack = requiredSlack * (1.0 + 1e-3) + 1e-9;
         seed(slack) = std::clamp(
-            std::max(seed(slack), requiredSlack), 0.0, _contactParameters.maxForceSlack);
+            std::max(seed(slack), interiorSlack), 0.0, _contactParameters.maxForceSlack);
     }
 
     constraintMatrix = std::move(augmentedConstraints);
@@ -266,6 +270,13 @@ SerialLinkContactMPCC::on_extended_qp_solution(
     }
     _contactDiagnostics.solverSucceeded = true;
     _contactDiagnostics.fallbackUsed = false;
+    // A feasible answer is not a converged one: the seed is feasible by
+    // construction and every active-set iterate preserves feasibility, so the
+    // solver's termination state is the only signal that separates an optimum
+    // from a solution truncated at the iteration cap. Reported alongside
+    // solverSucceeded rather than folded into it, so that the control path is
+    // unchanged and the distinction stays visible to the caller.
+    _contactDiagnostics.qpConverged = context.qpConverged;
     _contactDiagnostics.firstCommand.head<3>() =
         context.predictionRotation * optimum.head<3>();
     _contactDiagnostics.firstCommand.tail<3>() =

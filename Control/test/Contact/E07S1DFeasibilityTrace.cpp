@@ -74,6 +74,31 @@ void write_vector(const std::filesystem::path &path, const Eigen::VectorXd &x)
     for(Eigen::Index index = 0; index < x.size(); ++index) stream << x(index) << '\n';
 }
 
+/**
+ * Load the optional fixed-variable equality block. Snapshots written before
+ * the MPCC QP split fixed variables out of its box carry no such file, and
+ * must keep replaying exactly as they did.
+ */
+bool load_equalities(const std::filesystem::path &directory,
+                     Eigen::MatrixXd &equalityMatrix,
+                     Eigen::VectorXd &equalityVector)
+{
+    const std::filesystem::path matrixPath = directory / "Aeq.csv";
+    const std::filesystem::path vectorPath = directory / "yeq.csv";
+    if(not std::filesystem::exists(matrixPath) or not std::filesystem::exists(vectorPath))
+    {
+        return false;
+    }
+    equalityMatrix = read_csv(matrixPath);
+    if(equalityMatrix.rows() == 0) return false;
+    equalityVector = read_vector(vectorPath);
+    if(equalityVector.size() != equalityMatrix.rows())
+    {
+        throw std::runtime_error("Equality block row mismatch in " + directory.string());
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -94,6 +119,8 @@ int main(int argc, char **argv)
         const Eigen::MatrixXd B = read_csv(snapshot / "B.csv");
         const Eigen::VectorXd z = read_vector(snapshot / "z.csv");
         const Eigen::VectorXd seed = read_vector(seedPath);
+        Eigen::MatrixXd Aeq; Eigen::VectorXd yeq;
+        const bool hasEqualities = load_equalities(snapshot, Aeq, yeq);
 
         SolverOptions<double> options;
         options.method = "active set";
@@ -129,7 +156,9 @@ int main(int argc, char **argv)
                 write_semicolon_vector(trace, record.x); trace << ',';
                 write_semicolon_vector(trace, record.dx); trace << '\n';
             });
-        const Eigen::VectorXd solution = solver.solve(H, f, B, z, seed);
+        const Eigen::VectorXd solution = hasEqualities
+            ? solver.solve(H, f, Aeq, yeq, B, z, seed)
+            : solver.solve(H, f, B, z, seed);
         trace.close();
         write_vector(output / "raw_solution.csv", solution);
         const auto result = solver.results();

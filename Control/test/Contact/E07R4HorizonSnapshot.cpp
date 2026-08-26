@@ -180,6 +180,10 @@ int main(int argc, char **argv)
     write_matrix(output / "f.csv", diagnostics.qpGradient);
     write_matrix(output / "B.csv", diagnostics.qpConstraintMatrix);
     write_matrix(output / "z.csv", diagnostics.qpConstraintVector);
+    // Fixed variables are carried as an equality block, so a snapshot that
+    // records only B/z is no longer the complete frozen QP.
+    write_matrix(output / "Aeq.csv", diagnostics.qpEqualityMatrix);
+    write_matrix(output / "yeq.csv", diagnostics.qpEqualityVector);
     write_matrix(output / "U0.csv", diagnostics.qpSeed);
     write_matrix(output / "production_solution.csv",
                  diagnostics.qpReturnedSolution);

@@ -59,6 +59,7 @@ if(BUILD_TESTING)
     add_control_test(mpcc_stage_tangent_coordinates_test test/TrajectoryTracking/MpccStageTangentCoordinates.cpp)
     add_control_test(common_progress_schedule_test test/TrajectoryTracking/CommonProgressSchedule.cpp)
     add_control_test(rmpcc_qp_constraints_test test/TrajectoryTracking/RmpccQpConstraints.cpp)
+    add_control_test(mpcc_qp_constraints_test test/TrajectoryTracking/MpccQpConstraints.cpp)
     add_control_test(admittance_contact_controller_test test/Contact/AdmittanceContactController.cpp)
     add_control_test(contact_geometry_test test/Contact/ContactGeometry.cpp)
     add_control_test(moving_frame_contact_mpc_test test/Contact/MovingFrameContactMpc.cpp)
@@ -66,6 +67,7 @@ if(BUILD_TESTING)
     add_control_test(contact_adaptive_mpcc_test test/Contact/ContactAdaptiveMPCC.cpp)
     add_control_test(predictive_contact_mpcc_test test/Contact/PredictiveContactMPCC.cpp)
     add_control_test(contact_closed_loop_test test/Contact/ContactClosedLoop.cpp)
+    add_control_test(contact_qp_convergence_test test/Contact/ContactQpConvergence.cpp)
 
     # E06-Q deterministic tolerance sweep. Formal execution supplies the
     # production URDF and evidence directory, so it is intentionally not CTest.

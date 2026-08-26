@@ -372,17 +372,23 @@ SerialLinkPredictiveContactMPCC::extend_qp_problem(
                 + slewOffset(stage) / slewScale;
         }
 
+        // Seed strictly inside each band. The exact minimum leaves the row
+        // tight, and a tight row at the seed costs the active-set solver a
+        // zero-progress iteration per stage before it can move at all.
         const double seededForce = forceConstant
             + forceRow.dot(seed.head(C));
-        seed(forceSlack) = std::max({
-            seed(forceSlack), 0.0,
+        const double requiredForceSlack = std::max({
+            0.0,
             seededForce - _parameters.maximumForce,
             _parameters.minimumForce - seededForce});
+        seed(forceSlack) = std::max(
+            seed(forceSlack), requiredForceSlack * (1.0 + 1e-3) + 1e-9);
         const double seededPenetration = penetrationConstant
             + penetrationRow.dot(seed.head(C));
+        const double requiredPenetrationSlack =
+            std::max(0.0, std::abs(seededPenetration) / rhoScale - 1.0);
         seed(penetrationSlack) = std::max(
-            seed(penetrationSlack),
-            std::max(0.0, std::abs(seededPenetration) / rhoScale - 1.0));
+            seed(penetrationSlack), requiredPenetrationSlack * (1.0 + 1e-3) + 1e-9);
     }
     constraintMatrix = std::move(bounded);
     constraintVector = std::move(limits);

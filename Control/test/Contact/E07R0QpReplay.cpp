@@ -148,6 +148,31 @@ void polish(Eigen::VectorXd &x, const Eigen::MatrixXd &B,
     }
 }
 
+/**
+ * Load the optional fixed-variable equality block. Snapshots written before
+ * the MPCC QP split fixed variables out of its box carry no such file, and
+ * must keep replaying exactly as they did.
+ */
+bool load_equalities(const std::filesystem::path &directory,
+                     Eigen::MatrixXd &equalityMatrix,
+                     Eigen::VectorXd &equalityVector)
+{
+    const std::filesystem::path matrixPath = directory / "Aeq.csv";
+    const std::filesystem::path vectorPath = directory / "yeq.csv";
+    if(not std::filesystem::exists(matrixPath) or not std::filesystem::exists(vectorPath))
+    {
+        return false;
+    }
+    equalityMatrix = read_csv(matrixPath);
+    if(equalityMatrix.rows() == 0) return false;
+    equalityVector = read_vector(vectorPath);
+    if(equalityVector.size() != equalityMatrix.rows())
+    {
+        throw std::runtime_error("Equality block row mismatch in " + directory.string());
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -169,6 +194,8 @@ int main(int argc, char **argv)
         const Eigen::VectorXd f = read_vector(directory / "f.csv");
         const Eigen::MatrixXd fullB = read_csv(directory / "B.csv");
         const Eigen::VectorXd fullZ = read_vector(directory / "z.csv");
+        Eigen::MatrixXd Aeq; Eigen::VectorXd yeq;
+        const bool hasEqualities = load_equalities(directory, Aeq, yeq);
         const int horizon = 12;
         std::vector<int> selected = group_rows(group, fullB.rows(), horizon);
         Eigen::MatrixXd B(selected.size(), fullB.cols());
@@ -196,7 +223,9 @@ int main(int argc, char **argv)
         options.maxSteps = maxSteps;
         QPSolver<double> solver(options);
         const auto start = std::chrono::steady_clock::now();
-        Eigen::VectorXd solution = solver.solve(H, f, B, z, seed);
+        Eigen::VectorXd solution = hasEqualities
+            ? solver.solve(H, f, Aeq, yeq, B, z, seed)
+            : solver.solve(H, f, B, z, seed);
         const auto stop = std::chrono::steady_clock::now();
         const double solveTimeMs = std::chrono::duration<double, std::milli>(
             stop - start).count();

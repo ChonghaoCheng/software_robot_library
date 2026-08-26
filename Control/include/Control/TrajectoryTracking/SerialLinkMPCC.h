@@ -104,11 +104,18 @@ struct MpccDiagnostics
     double parentMeasurementAgeSeconds = 0.0;
     int stageControlDimension = 7;
     Eigen::VectorXd optimalHorizon;
+    /** Number of independent equality rows carried by the frozen QP. */
+    double qpEqualityRows = 0.0;
+    /** Maximum |A x - y| over those equality rows for the returned solution. */
+    double qpEqualityViolation = 0.0;
     /** Exact frozen condensed QP used by the most recent solve (diagnostic only). */
     Eigen::MatrixXd qpHessian;
     Eigen::VectorXd qpGradient;
     Eigen::MatrixXd qpConstraintMatrix;
     Eigen::VectorXd qpConstraintVector;
+    /** Fixed-variable equality block. Empty when no bound pair coincides. */
+    Eigen::MatrixXd qpEqualityMatrix;
+    Eigen::VectorXd qpEqualityVector;
     Eigen::VectorXd qpSeed;
     /** Last vector returned by the QP solver, including a failing solve. */
     Eigen::VectorXd qpReturnedSolution;
@@ -128,6 +135,12 @@ struct MpccQpExtensionContext
     std::vector<Eigen::Matrix4d> parentTransforms;
     std::vector<double> stageProgress;
     Eigen::VectorXd previousWarmStart;
+    /**
+     * Whether the QP reached its convergence exit rather than the iteration
+     * cap. Meaningful only in on_extended_qp_solution(); it is false while the
+     * problem is still being assembled in extend_qp_problem().
+     */
+    bool qpConverged = false;
 };
 
 class SerialLinkMPCC : public SerialLinkVelocityBase

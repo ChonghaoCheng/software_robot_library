@@ -4,6 +4,7 @@
  */
 
 #include <Control/TrajectoryTracking/SerialLinkMPCC.h>
+#include "detail/MpccQpConstraints.h"
 #include "detail/ProgressSchedule.h"
 #include "detail/RmpccCostGeometry.h"
 #include <Math/CondensedMPC.h>
@@ -626,20 +627,62 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         configure_additional_stage_inputs(stage, lower, upper, nominalControl);
     }
 
-    const RobotLibrary::Math::BoxConstraint box =
-        RobotLibrary::Math::box_constraint(lower, upper);
-    MatrixXd constraintMatrix =
-        MatrixXd::Zero(box.constraintMatrix.rows() + 1, controlDim);
-    VectorXd constraintVector =
-        VectorXd::Zero(box.constraintVector.size() + 1);
-    constraintMatrix.topRows(box.constraintMatrix.rows()) = box.constraintMatrix;
-    constraintVector.head(box.constraintVector.size()) = box.constraintVector;
+    // Variables whose bounds coincide (a fixed progress schedule, a pinned
+    // progress rate, a disabled virtual input) become one independent equality
+    // each. Keeping them as two opposing inequalities puts every feasible seed
+    // on a degenerate vertex, where the active-set ratio test returns a zero
+    // step and each iteration only identifies a redundant row.
+    const detail::PinnedBoxSplit boxSplit = detail::split_pinned_box(lower, upper);
+    const int boxRows = static_cast<int>(boxSplit.inequalityMatrix.rows());
+
+    // The cumulative-progress row sums only progress-rate variables. When every
+    // one of them is pinned the row is a constant: it is then either implied
+    // (and redundant, so keeping it would add one more degenerate active row)
+    // or unsatisfiable, which is a configuration error worth reporting here
+    // rather than as an opaque solver failure.
+    std::vector<char> variableIsPinned(static_cast<std::size_t>(controlDim), 0);
+    for(const int index : boxSplit.pinnedIndices)
+    {
+        variableIsPinned[static_cast<std::size_t>(index)] = 1;
+    }
+    bool progressRowIsConstant = true;
+    double pinnedProgressAdvance = 0.0;
     for(int stage = 0; stage < N; ++stage)
     {
-        constraintMatrix(box.constraintMatrix.rows(),
-                         stage * stageControlDim + PROGRESS_RATE_INDEX) = _dt;
+        const int index = stage * stageControlDim + PROGRESS_RATE_INDEX;
+        if(variableIsPinned[static_cast<std::size_t>(index)])
+        {
+            pinnedProgressAdvance += _dt * 0.5 * (lower(index) + upper(index));
+        }
+        else
+        {
+            progressRowIsConstant = false;
+        }
     }
-    constraintVector.tail<1>()(0) = remaining;
+    if(progressRowIsConstant and pinnedProgressAdvance > remaining + 1e-9)
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): The fixed progress schedule advances "
+            + std::to_string(pinnedProgressAdvance) + " over the horizon but only "
+            + std::to_string(remaining) + " progress remains.");
+    }
+    const int progressRows = progressRowIsConstant ? 0 : 1;
+
+    MatrixXd constraintMatrix = MatrixXd::Zero(boxRows + progressRows, controlDim);
+    VectorXd constraintVector = VectorXd::Zero(boxRows + progressRows);
+    constraintMatrix.topRows(boxRows) = boxSplit.inequalityMatrix;
+    constraintVector.head(boxRows) = boxSplit.inequalityVector;
+    if(progressRows > 0)
+    {
+        for(int stage = 0; stage < N; ++stage)
+        {
+            constraintMatrix(boxRows,
+                             stage * stageControlDim + PROGRESS_RATE_INDEX) = _dt;
+        }
+        constraintVector.tail<1>()(0) = remaining;
+    }
+    MatrixXd equalityMatrix = boxSplit.equalityMatrix;
+    VectorXd equalityVector = boxSplit.equalityVector;
 
     auto make_feasible = [&](VectorXd seed)
     {
@@ -688,9 +731,20 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     extensionContext.stageProgress = stageProgress;
     extensionContext.previousWarmStart = _warmStart;
     extend_qp_problem(extensionContext, H, f, constraintMatrix, constraintVector, seed);
+    // Extensions may append decision variables; the equality block was built
+    // against the base width, so widen it before any dimension check.
+    if(equalityMatrix.rows() > 0 and equalityMatrix.cols() < H.cols())
+    {
+        MatrixXd widened = MatrixXd::Zero(equalityMatrix.rows(), H.cols());
+        widened.leftCols(equalityMatrix.cols()) = equalityMatrix;
+        equalityMatrix = std::move(widened);
+    }
     if(H.rows() != H.cols() or f.size() != H.rows()
        or constraintMatrix.cols() != H.cols()
        or constraintVector.size() != constraintMatrix.rows()
+       or (equalityMatrix.rows() > 0
+           and (equalityMatrix.cols() != H.cols()
+                or equalityVector.size() != equalityMatrix.rows()))
        or seed.size() != H.rows() or not H.allFinite() or not f.allFinite())
     {
         throw std::runtime_error(
@@ -701,10 +755,16 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.qpGradient = f;
     _diagnostics.qpConstraintMatrix = constraintMatrix;
     _diagnostics.qpConstraintVector = constraintVector;
+    _diagnostics.qpEqualityMatrix = equalityMatrix;
+    _diagnostics.qpEqualityVector = equalityVector;
+    _diagnostics.qpEqualityRows = static_cast<double>(equalityMatrix.rows());
     _diagnostics.qpSeed = seed;
     _diagnostics.qpStatus = 0.0;
     const auto solveStart = std::chrono::steady_clock::now();
-    VectorXd optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
+    VectorXd optimum = equalityMatrix.rows() > 0
+        ? _qpSolver.solve(H, f, equalityMatrix, equalityVector,
+                          constraintMatrix, constraintVector, seed)
+        : _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
     _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - solveStart).count();
     const SolverResults<double> qpResults = _qpSolver.results();
@@ -717,6 +777,15 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     {
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): QP returned an invalid solution.");
+    }
+    _diagnostics.qpEqualityViolation = equalityMatrix.rows() == 0
+        ? 0.0
+        : (equalityMatrix * optimum - equalityVector).cwiseAbs().maxCoeff();
+    if(_diagnostics.qpEqualityViolation > 1e-6)
+    {
+        throw std::runtime_error(
+            "[ERROR] [SERIAL LINK MPCC] solve_mpcc(): QP violated a fixed-variable equality by "
+            + std::to_string(_diagnostics.qpEqualityViolation) + ".");
     }
     double constraintViolation =
         (constraintMatrix * optimum - constraintVector).maxCoeff();
@@ -779,6 +848,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     }
     shift_extension_warm_start(extensionContext, optimum, _warmStart);
     _diagnostics.shiftedWarmStart = _warmStart;
+    extensionContext.qpConverged = qpResults.converged;
     on_extended_qp_solution(extensionContext, optimum);
 
     Eigen::Vector<double,BASE_STAGE_CONTROL_DIMENSION> firstControl =

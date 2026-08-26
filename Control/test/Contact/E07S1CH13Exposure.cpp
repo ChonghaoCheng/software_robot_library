@@ -129,6 +129,10 @@ int main(int argc, char **argv)
     write_matrix(output / "f.csv", d.qpGradient);
     write_matrix(output / "B.csv", d.qpConstraintMatrix);
     write_matrix(output / "z.csv", d.qpConstraintVector);
+    // Fixed variables are carried as an equality block, so a snapshot that
+    // records only B/z is no longer the complete frozen QP.
+    write_matrix(output / "Aeq.csv", d.qpEqualityMatrix);
+    write_matrix(output / "yeq.csv", d.qpEqualityVector);
     write_matrix(output / "U0.csv", d.qpSeed);
     write_matrix(output / "solution.csv", d.qpReturnedSolution);
 
