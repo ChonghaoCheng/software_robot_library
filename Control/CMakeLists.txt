@@ -77,6 +77,8 @@ if(BUILD_TESTING)
     target_link_libraries(e07_r0_qp_replay PRIVATE Control)
     add_executable(e07_s1c_h13_exposure test/Contact/E07S1CH13Exposure.cpp)
     target_link_libraries(e07_s1c_h13_exposure PRIVATE Control)
+    add_executable(e07_s1d_feasibility_trace test/Contact/E07S1DFeasibilityTrace.cpp)
+    target_link_libraries(e07_s1d_feasibility_trace PRIVATE Control)
 
     # E07-R4 full controller-QP snapshot builder.  It reconstructs a recorded
     # planar-contact state and writes the frozen QP before any offline solve.

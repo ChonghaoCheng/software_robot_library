@@ -14,7 +14,9 @@
 #define QP_SOLVER_H
 
 #include <Eigen/Dense>                                                                              // Linear algebra and matrix decomposition
+#include <functional>                                                                               // function
 #include <iostream>                                                                                 // cerr, cout
+#include <string>                                                                                   // string
 #include <vector>                                                                                   // vector
 
 /**
@@ -44,6 +46,34 @@ struct SolverResults
     DataType finalStepSize     = std::numeric_limits<float>::max();                                 ///< The final step size at which the algorithm terminated
     DataType objectiveFunction = std::numeric_limits<float>::max();                                 ///< The magnitude of the error for the problem
     Eigen::Vector<DataType,Eigen::Dynamic> solution;                                                ///< The final / last solution when the solver was run
+};
+
+/**
+ * @brief Read-only diagnostic snapshot of the primal active-set algorithm.
+ * @details The optional sink is null by default.  Populating these records must
+ *          not participate in, or alter, the numerical algorithm.
+ */
+template <typename DataType = float>
+struct ActiveSetTraceRecord
+{
+    std::string event;
+    int iteration = -1;
+    Eigen::Vector<DataType, Eigen::Dynamic> x;
+    Eigen::Vector<DataType, Eigen::Dynamic> dx;
+    std::vector<int> activeSet;
+    std::vector<int> inactiveSet;
+    DataType stepSize = std::numeric_limits<DataType>::quiet_NaN();
+    DataType alpha = std::numeric_limits<DataType>::quiet_NaN();
+    int blockingConstraint = -1;
+    int ratioConstraint = -1;
+    DataType ratioSlack = std::numeric_limits<DataType>::quiet_NaN();
+    DataType ratioAddedDistance = std::numeric_limits<DataType>::quiet_NaN();
+    DataType rawRatio = std::numeric_limits<DataType>::quiet_NaN();
+    DataType schurSolveResidual = std::numeric_limits<DataType>::quiet_NaN();
+    DataType schurRhsNorm = std::numeric_limits<DataType>::quiet_NaN();
+    DataType schurAcceptanceThreshold = std::numeric_limits<DataType>::quiet_NaN();
+    bool schurLdltAccepted = false;
+    bool schurCodFallbackUsed = false;
 };
 
 /**
@@ -221,11 +251,20 @@ class QPSolver
         SolverResults<DataType>
         results() const { return _results; }
 
+        /** Attach an optional read-only active-set diagnostic sink. */
+        void set_active_set_trace_sink(
+            std::function<void(const ActiveSetTraceRecord<DataType>&)> sink)
+        {
+            _activeSetTraceSink = std::move(sink);
+        }
+
     private:
 
         SolverResults<DataType> _results;                                                           ///< Performance data on the interior point algorithm
 
         SolverOptions<DataType> _options;                                                           ///< For the interior point algorithm
+
+        std::function<void(const ActiveSetTraceRecord<DataType>&)> _activeSetTraceSink;
 
         enum Method {activeSet, interiorPoint} _method = activeSet;                                 ///< Determines which algorithm is applied
 
@@ -644,6 +683,48 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
 
     _results.converged = false;
 
+    auto emitTrace = [&](const std::string &event,
+                         int iteration,
+                         const Vector<DataType, Dynamic> &traceX,
+                         const Vector<DataType, Dynamic> &traceDx,
+                         const std::vector<int> &traceActive,
+                         const std::vector<int> &traceInactive,
+                         DataType traceStep = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceAlpha = std::numeric_limits<DataType>::quiet_NaN(),
+                         int traceBlocking = -1,
+                         int traceRatioConstraint = -1,
+                         DataType traceRatioSlack = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceAddedDistance = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceRawRatio = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceSchurResidual = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceSchurRhsNorm = std::numeric_limits<DataType>::quiet_NaN(),
+                         DataType traceSchurThreshold = std::numeric_limits<DataType>::quiet_NaN(),
+                         bool traceLdltAccepted = false,
+                         bool traceCodFallback = false)
+    {
+        if(not _activeSetTraceSink) return;
+        ActiveSetTraceRecord<DataType> record;
+        record.event = event;
+        record.iteration = iteration;
+        record.x = traceX;
+        record.dx = traceDx;
+        record.activeSet = traceActive;
+        record.inactiveSet = traceInactive;
+        record.stepSize = traceStep;
+        record.alpha = traceAlpha;
+        record.blockingConstraint = traceBlocking;
+        record.ratioConstraint = traceRatioConstraint;
+        record.ratioSlack = traceRatioSlack;
+        record.ratioAddedDistance = traceAddedDistance;
+        record.rawRatio = traceRawRatio;
+        record.schurSolveResidual = traceSchurResidual;
+        record.schurRhsNorm = traceSchurRhsNorm;
+        record.schurAcceptanceThreshold = traceSchurThreshold;
+        record.schurLdltAccepted = traceLdltAccepted;
+        record.schurCodFallbackUsed = traceCodFallback;
+        _activeSetTraceSink(record);
+    };
+
     LDLT<Matrix<DataType, Dynamic, Dynamic>> Hdecomp = H.ldlt();                                    // LDLT decomposition of Hessian matrix
  
     if (Hdecomp.info() != Eigen::Success)
@@ -669,8 +750,12 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
     Vector<DataType, Dynamic> invHf = Hdecomp.solve(f);                                             // H^{-1} * f
     Matrix<DataType, Dynamic, Dynamic> C = A;                                                       // Active constraint matrix
 
+    const Vector<DataType, Dynamic> emptyVector;
+    emitTrace("initial_original_seed", -1, x0, emptyVector, activeSet, inactiveSet);
+
     // Ensure initial guess satisfies A * x0 = y
     x = x0 + A.transpose() * (A * A.transpose()).ldlt().solve(y - A * x0);
+    emitTrace("initial_equality_projection", -1, x, emptyVector, activeSet, inactiveSet);
     
     // Flag the inequality constraints that are violated
     for (int i = 0; i < z.size(); ++i)
@@ -684,6 +769,8 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         if (distance < -1e-10) activeSet.push_back(i);
         else                   inactiveSet.push_back(i);
     }
+    emitTrace("initial_constraint_classification", -1, x, emptyVector,
+              activeSet, inactiveSet);
     
     if (activeSet.size() > dim)
     {
@@ -716,6 +803,8 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         }
         x += Bsub.transpose() * correction;                                                        // Shift the start point
     }
+    emitTrace("initial_feasibility_projection", -1, x, emptyVector,
+              activeSet, inactiveSet);
     
     // Run the active set method
     for (int i = 0; i < _options.maxSteps; ++i)
@@ -727,6 +816,7 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         Vector<DataType, Dynamic> invHg = x + invHf;                                                // Gradient to optimal solution
  
         previousActiveSet = activeSet;                                                              // Save this
+        emitTrace("iteration_begin", i, x, emptyVector, activeSet, inactiveSet);
                 
         // Construct the active constraint matrix
         int numConstraints = numEqualConstraints + activeSet.size();
@@ -743,16 +833,29 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         const Matrix<DataType, Dynamic, Dynamic> schur = C * invHCt;
         const Vector<DataType, Dynamic> schurRhs = C * invHg;
         lambda = schur.ldlt().solve(schurRhs);                                                       // Lagrange multipliers
-        if(not lambda.allFinite()
-           or (schur * lambda - schurRhs).norm()
-                > 1e-10 * (1.0 + schurRhs.norm()))
+        DataType schurResidual = (schur * lambda - schurRhs).norm();
+        const DataType schurRhsNorm = schurRhs.norm();
+        const DataType schurAcceptanceThreshold = 1e-10 * (1.0 + schurRhsNorm);
+        bool schurLdltAccepted = lambda.allFinite()
+            and schurResidual <= schurAcceptanceThreshold;
+        bool schurCodFallback = false;
+        if(not schurLdltAccepted)
         {
             lambda = schur.completeOrthogonalDecomposition().solve(schurRhs);
+            schurCodFallback = true;
+            schurResidual = (schur * lambda - schurRhs).norm();
         }
             
         dx = invHCt * lambda - invHg;                                                               // Constrained step
         
         stepSize = dx.norm();
+        emitTrace("direction", i, x, dx, activeSet, inactiveSet,
+                  stepSize, std::numeric_limits<DataType>::quiet_NaN(), -1, -1,
+                  std::numeric_limits<DataType>::quiet_NaN(),
+                  std::numeric_limits<DataType>::quiet_NaN(),
+                  std::numeric_limits<DataType>::quiet_NaN(), schurResidual,
+                  schurRhsNorm, schurAcceptanceThreshold,
+                  schurLdltAccepted, schurCodFallback);
          
         if (stepSize <= _options.stepSizeTolerance)
         {
@@ -774,12 +877,17 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
             
             if (freeConstraint > -1)                                                                // Remove free constraint from active set
             {
+                const int releasedConstraint = activeSet[freeConstraint];
                 inactiveSet.push_back(activeSet[freeConstraint]);                                   
                 activeSet.erase(activeSet.begin() + freeConstraint);
+                emitTrace("constraint_release", i, x, dx, activeSet, inactiveSet,
+                          stepSize, DataType(0), releasedConstraint);
             }
             else
             {
                 _results.converged = true;
+                emitTrace("converged", i, x, dx, activeSet, inactiveSet,
+                          stepSize, DataType(0));
                 break;                                                                              // Optimal solution found
             }
         }
@@ -798,9 +906,14 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                 // Check to see if we are moving toward a currently inactive constraint
                 if (addedDistance > 0.0)
                 {
+                    const DataType slack = z(index) - B.row(index).dot(x);
+                    const DataType rawRatio = slack / addedDistance;
+                    emitTrace("ratio_candidate", i, x, dx, activeSet, inactiveSet,
+                              stepSize, std::numeric_limits<DataType>::quiet_NaN(),
+                              -1, index, slack, addedDistance, rawRatio);
                     double ratio = std::max<DataType>(
                         0.0,
-                        (z(index) - B.row(index).dot(x)) / addedDistance);                           // Current distance / added distance
+                        rawRatio);                                                                  // Current distance / added distance
                     
                     if (ratio < alpha)
                     {
@@ -809,8 +922,24 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                     }
                 }
             }
+
+            DataType blockingSlack = std::numeric_limits<DataType>::quiet_NaN();
+            DataType blockingAddedDistance = std::numeric_limits<DataType>::quiet_NaN();
+            DataType blockingRawRatio = std::numeric_limits<DataType>::quiet_NaN();
+            if(blockingConstraint >= 0)
+            {
+                blockingSlack = z(blockingConstraint) - B.row(blockingConstraint).dot(x);
+                blockingAddedDistance = B.row(blockingConstraint).dot(dx);
+                blockingRawRatio = blockingSlack / blockingAddedDistance;
+            }
+            emitTrace("ratio_summary", i, x, dx, activeSet, inactiveSet,
+                      stepSize, alpha, blockingConstraint, blockingConstraint,
+                      blockingSlack, blockingAddedDistance, blockingRawRatio);
             
             x += alpha * dx;                                                                        // Take a step toward optimal solution   
+            emitTrace("after_step", i, x, dx, activeSet, inactiveSet,
+                      stepSize, alpha, blockingConstraint, blockingConstraint,
+                      blockingSlack, blockingAddedDistance, blockingRawRatio);
              
             // An inactive constraint blocked us, so add to active set for next loop
             if (alpha < 1.0)
@@ -820,6 +949,9 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
                 inactiveSet.erase(std::remove(inactiveSet.begin(), inactiveSet.end(), blockingConstraint),
                                   inactiveSet.end());
             }
+            emitTrace("working_set_update", i, x, dx, activeSet, inactiveSet,
+                      stepSize, alpha, blockingConstraint, blockingConstraint,
+                      blockingSlack, blockingAddedDistance, blockingRawRatio);
             
             // Keep iterating after a full step with the same working set. The
             // next zero-step iteration checks active inequality multipliers and
