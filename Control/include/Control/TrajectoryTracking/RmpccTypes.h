@@ -12,7 +12,8 @@ enum class RmpccPredictorGeometry
 enum class RmpccReferenceMotion
 {
     LegacyTangentProduct,
-    StageConsistent
+    StageConsistent,
+    FiniteStageExact
 };
 
 enum class RmpccLagGeometry

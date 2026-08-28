@@ -660,11 +660,22 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
     std::vector<int> activeSet;
     std::vector<int> inactiveSet;
     std::vector<int> previousActiveSet;
+    activeSet.reserve(static_cast<std::size_t>(numInequalConstraints));
+    inactiveSet.reserve(static_cast<std::size_t>(numInequalConstraints));
+    previousActiveSet.reserve(static_cast<std::size_t>(numInequalConstraints));
 
     // Pre-compute values, allocate memory to save time
     Vector<DataType, Dynamic> x;                                                                    // We want to solve for this
     Vector<DataType, Dynamic> invHf = Hdecomp.solve(f);                                             // H^{-1} * f
-    Matrix<DataType, Dynamic, Dynamic> C = A;                                                       // Active constraint matrix
+    // The working-set size changes during the solve, but its maximum size is
+    // fixed by the decision dimension. Allocate that storage once instead of
+    // repeatedly resizing the active-constraint matrix inside the iteration.
+    Matrix<DataType, Dynamic, Dynamic> C(
+        numEqualConstraints + std::min(numInequalConstraints, dim), dim);
+    if(numEqualConstraints > 0)
+    {
+        C.topRows(numEqualConstraints) = A;
+    }
 
     // Ensure initial guess satisfies A * x0 = y
     x = x0 + A.transpose() * (A * A.transpose()).ldlt().solve(y - A * x0);
@@ -712,16 +723,16 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
         // Construct the active constraint matrix
         int numConstraints = numEqualConstraints + activeSet.size();
         
-        C.conservativeResize(numConstraints, NoChange);
-        
         for (int j = 0; j < activeSet.size(); ++j)
         {
             C.row(numEqualConstraints + j) = B.row(activeSet[j]);
         }
-        
-        Matrix<DataType, Dynamic, Dynamic> invHCt = Hdecomp.solve(C.transpose());                   // Inverse of Hessian * constraint matrix (transposed)
+
+        const auto activeConstraints = C.topRows(numConstraints);
+        Matrix<DataType, Dynamic, Dynamic> invHCt =
+            Hdecomp.solve(activeConstraints.transpose());                                           // Inverse of Hessian * constraint matrix (transposed)
             
-        lambda = (C * invHCt).ldlt().solve(C * invHg);                                              // Lagrange multipliers
+        lambda = (activeConstraints * invHCt).ldlt().solve(activeConstraints * invHg);               // Lagrange multipliers
             
         dx = invHCt * lambda - invHg;                                                               // Constrained step
         

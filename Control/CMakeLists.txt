@@ -35,6 +35,7 @@ if(BUILD_TESTING)
 
     add_control_test(rmpcc_prediction_test test/TrajectoryTracking/RmpccPrediction.cpp)
     add_control_test(rmpcc_reference_motion_test test/TrajectoryTracking/RmpccReferenceMotion.cpp)
+    add_control_test(rmpcc_finite_stage_exact_test test/TrajectoryTracking/RmpccFiniteStageExact.cpp)
     add_control_test(lie_algebra_mpc_prediction_test test/TrajectoryTracking/LieAlgebraMPCPrediction.cpp)
     add_control_test(time_indexed_mpc_diagnostics_test test/TrajectoryTracking/TimeIndexedMpcDiagnostics.cpp)
     add_control_test(cartesian_mpcc_prediction_test test/TrajectoryTracking/CartesianMPCCPrediction.cpp)

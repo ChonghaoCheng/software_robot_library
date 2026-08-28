@@ -82,6 +82,7 @@ struct RmpccParameters
     double geometricTangentStep      = 1e-4;     ///< Centred Lie derivative step in experimental StageConsistent mode
     double rtiFiniteDifferenceStep   = 1e-6;     ///< Perturbation used for stage-wise RTI Jacobians
     double hessianRegularization     = 1e-8;     ///< Tikhonov term added to the QP Hessian
+    bool enableDetailedDiagnostics   = true;     ///< Reconstruct research-only post-QP horizon diagnostics
 
     // Progress shaping
     double progressReward            = 2e-4;     ///< Stage-integral reward encouraging forward progress
@@ -161,9 +162,16 @@ struct RmpccDiagnostics
     double residualHessianAssemblyTimeSeconds = 0.0;
     double constraintConstructionTimeSeconds = 0.0;
     double totalSolveTimeSeconds = 0.0;
+    double warmStartPredictionTimeSeconds = 0.0;
+    double residualLinearizationTimeSeconds = 0.0;
+    double pathVelocityObjectiveTimeSeconds = 0.0;
+    double finalHessianAssemblyTimeSeconds = 0.0;
+    double postQpTimeSeconds = 0.0;
     std::uint64_t stateLinearizationHash = 0; ///< PERF-01 opt-in numerical audit
     std::uint64_t residualLinearizationHash = 0; ///< PERF-01 opt-in numerical audit
     std::uint64_t hessianHash = 0; ///< PERF-01 opt-in numerical audit
+    std::uint64_t linearTermHash = 0; ///< Opt-in hash of QP linear term f
+    std::uint64_t qpSolutionHash = 0; ///< Opt-in hash of accepted/clipped zOpt
     double qpPrimalViolation    = 0.0;  ///< Maximum equality/inequality residual before post-solve acceptance
     double qpEqualityRows       = 0.0;  ///< Number of explicit task-space QP equality rows
     double qpInequalityRows     = 0.0;  ///< Number of task-space QP inequality rows

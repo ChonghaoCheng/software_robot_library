@@ -28,6 +28,271 @@ struct RmpccPathVelocityResidualLinearization
     Eigen::Matrix<double,6,7> inputJacobian = Eigen::Matrix<double,6,7>::Zero();
 };
 
+/**
+ * Exact active-reference displacement shared by static and moving parents.
+ * Identity/equal consecutive parent poses recover D(s)^-1 D(s_next).
+ */
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+Eigen::Matrix4d
+rmpcc_active_reference_displacement(
+    const double progress,
+    const double progressRate,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    if(not std::isfinite(progress) or not std::isfinite(progressRate)
+       or not std::isfinite(dt) or dt <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [RMPCC REFERENCE MOTION] finite state/rate and positive dt required.");
+    }
+    auto &&reference = referenceTransform;
+    auto &&parent = parentTransform;
+    const double s = std::clamp(progress, 0.0, 1.0);
+    const double next = std::clamp(s + dt * progressRate, 0.0, 1.0);
+    const Eigen::Matrix4d currentPath = reference(s);
+    return RobotLibrary::Math::se3_inverse(currentPath)
+           * RobotLibrary::Math::se3_inverse(parent(stage))
+           * parent(stage + 1) * reference(next);
+}
+
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+RmpccStateVector
+rmpcc_finite_stage_state_step(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    const Eigen::Matrix4d displacement = rmpcc_active_reference_displacement(
+        state(6), input(6), dt, stage,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ParentTransformFunction>(parentTransform));
+    const Eigen::Matrix4d relative =
+        RobotLibrary::Math::se3_exponential(state.head<6>());
+    RmpccStateVector next;
+    next.head<6>() = RobotLibrary::Math::se3_logarithm(
+        RobotLibrary::Math::se3_inverse(displacement)
+        * relative * RobotLibrary::Math::se3_exponential(dt * input.head<6>()));
+    next(6) = std::clamp(state(6) + dt * input(6), 0.0, 1.0);
+    return next;
+}
+
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+RmpccStageLinearization
+rmpcc_linearize_finite_stage_state_step(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    const double finiteDifferenceStep,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    if(not std::isfinite(finiteDifferenceStep) or finiteDifferenceStep <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [RMPCC REFERENCE MOTION] finiteDifferenceStep must be positive.");
+    }
+    auto &&reference = referenceTransform;
+    auto &&parent = parentTransform;
+    const auto evaluate = [&](const RmpccStateVector &x, const RmpccInputVector &u)
+    {
+        return rmpcc_finite_stage_state_step(
+            x, u, dt, stage, reference, parent);
+    };
+    const Eigen::Matrix4d nominalDisplacement =
+        rmpcc_active_reference_displacement(
+            state(6), input(6), dt, stage, reference, parent);
+    const auto evaluateWithNominalDisplacement =
+        [&](const RmpccStateVector &x, const RmpccInputVector &u)
+    {
+        const Eigen::Matrix4d relative =
+            RobotLibrary::Math::se3_exponential(x.head<6>());
+        RmpccStateVector next;
+        next.head<6>() = RobotLibrary::Math::se3_logarithm(
+            RobotLibrary::Math::se3_inverse(nominalDisplacement)
+            * relative
+            * RobotLibrary::Math::se3_exponential(dt * u.head<6>()));
+        next(6) = std::clamp(x(6) + dt * u(6), 0.0, 1.0);
+        return next;
+    };
+
+    RmpccStageLinearization result;
+    result.nominalNext = evaluateWithNominalDisplacement(state, input);
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccStateVector plus = state;
+        RmpccStateVector minus = state;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        if(column == 6)
+        {
+            plus(6) = std::clamp(plus(6), 0.0, 1.0);
+            minus(6) = std::clamp(minus(6), 0.0, 1.0);
+        }
+        const double denominator = plus(column) - minus(column);
+        if(std::abs(denominator) > 1e-15)
+        {
+            const RmpccStateVector plusNext = column < 6
+                ? evaluateWithNominalDisplacement(plus, input)
+                : evaluate(plus, input);
+            const RmpccStateVector minusNext = column < 6
+                ? evaluateWithNominalDisplacement(minus, input)
+                : evaluate(minus, input);
+            result.stateJacobian.col(column) =
+                (plusNext - minusNext) / denominator;
+        }
+    }
+    for(int column = 0; column < 7; ++column)
+    {
+        RmpccInputVector plus = input;
+        RmpccInputVector minus = input;
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        double denominator = 2.0 * finiteDifferenceStep;
+        if(column == 6)
+        {
+            const auto perturbations = rmpcc_progress_rate_perturbations(
+                state(6), input(6), dt, finiteDifferenceStep);
+            minus(6) = perturbations.first;
+            plus(6) = perturbations.second;
+            denominator = plus(6) - minus(6);
+        }
+        if(std::abs(denominator) > 1e-15)
+        {
+            const RmpccStateVector plusNext = column < 6
+                ? evaluateWithNominalDisplacement(state, plus)
+                : evaluate(state, plus);
+            const RmpccStateVector minusNext = column < 6
+                ? evaluateWithNominalDisplacement(state, minus)
+                : evaluate(state, minus);
+            result.inputJacobian.col(column) =
+                (plusNext - minusNext) / denominator;
+        }
+    }
+    return result;
+}
+
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+Eigen::Vector<double,6>
+rmpcc_finite_stage_feedforward(
+    const Eigen::Vector<double,6> &error,
+    const double progress,
+    const double progressRate,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    const Eigen::Matrix4d displacement = rmpcc_active_reference_displacement(
+        progress, progressRate, dt, stage,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ParentTransformFunction>(parentTransform));
+    return RobotLibrary::Math::adjoint(
+               RobotLibrary::Math::se3_inverse(
+                   RobotLibrary::Math::se3_exponential(error)))
+           * (RobotLibrary::Math::se3_logarithm(displacement) / dt);
+}
+
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+Eigen::Vector<double,6>
+rmpcc_finite_stage_path_velocity_residual(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    return input.head<6>() - rmpcc_finite_stage_feedforward(
+        state.head<6>(), state(6), input(6), dt, stage,
+        std::forward<ReferenceTransformFunction>(referenceTransform),
+        std::forward<ParentTransformFunction>(parentTransform));
+}
+
+template<typename ReferenceTransformFunction, typename ParentTransformFunction>
+RmpccPathVelocityResidualLinearization
+rmpcc_linearize_finite_stage_path_velocity_residual(
+    const RmpccStateVector &state,
+    const RmpccInputVector &input,
+    const double dt,
+    const int stage,
+    const double finiteDifferenceStep,
+    ReferenceTransformFunction &&referenceTransform,
+    ParentTransformFunction &&parentTransform)
+{
+    if(not std::isfinite(finiteDifferenceStep) or finiteDifferenceStep <= 0.0)
+    {
+        throw std::invalid_argument(
+            "[ERROR] [RMPCC REFERENCE MOTION] finiteDifferenceStep must be positive.");
+    }
+    auto &&reference = referenceTransform;
+    auto &&parent = parentTransform;
+    const auto evaluate = [&](const RmpccStateVector &x, const RmpccInputVector &u)
+    {
+        return rmpcc_finite_stage_path_velocity_residual(
+            x, u, dt, stage, reference, parent);
+    };
+    const Eigen::Matrix4d nominalDisplacement =
+        rmpcc_active_reference_displacement(
+            state(6), input(6), dt, stage, reference, parent);
+    const Eigen::Vector<double,6> nominalReferenceTwist =
+        RobotLibrary::Math::se3_logarithm(nominalDisplacement) / dt;
+    const auto residualAtError = [&](const Eigen::Vector<double,6> &error)
+        -> Eigen::Vector<double,6>
+    {
+        return (input.head<6>()
+            - RobotLibrary::Math::adjoint(
+                  RobotLibrary::Math::se3_inverse(
+                      RobotLibrary::Math::se3_exponential(error)))
+                  * nominalReferenceTwist).eval();
+    };
+    RmpccPathVelocityResidualLinearization result;
+    result.residual = residualAtError(state.head<6>());
+    for(int column = 0; column < 6; ++column)
+    {
+        Eigen::Vector<double,6> plus = state.head<6>();
+        Eigen::Vector<double,6> minus = state.head<6>();
+        plus(column) += finiteDifferenceStep;
+        minus(column) -= finiteDifferenceStep;
+        result.stateJacobian.col(column) =
+            (residualAtError(plus) - residualAtError(minus))
+            / (2.0 * finiteDifferenceStep);
+    }
+    RmpccStateVector progressPlus = state;
+    RmpccStateVector progressMinus = state;
+    progressPlus(6) = std::clamp(
+        state(6) + finiteDifferenceStep, 0.0, 1.0);
+    progressMinus(6) = std::clamp(
+        state(6) - finiteDifferenceStep, 0.0, 1.0);
+    const double progressDenominator = progressPlus(6) - progressMinus(6);
+    if(std::abs(progressDenominator) > 1e-15)
+    {
+        result.stateJacobian.col(6) =
+            (evaluate(progressPlus, input) - evaluate(progressMinus, input))
+            / progressDenominator;
+    }
+    result.inputJacobian.leftCols<6>().setIdentity();
+    const auto rates = rmpcc_progress_rate_perturbations(
+        state(6), input(6), dt, finiteDifferenceStep);
+    const double denominator = rates.second - rates.first;
+    if(std::abs(denominator) > 1e-15)
+    {
+        RmpccInputVector plus = input;
+        RmpccInputVector minus = input;
+        plus(6) = rates.second;
+        minus(6) = rates.first;
+        result.inputJacobian.col(6) =
+            (evaluate(state, plus) - evaluate(state, minus)) / denominator;
+    }
+    return result;
+}
+
 /** Legacy tangent-product path motion with a causal moving-parent factor. */
 template<typename ReferenceTransformFunction,
          typename ReferenceTangentFunction,

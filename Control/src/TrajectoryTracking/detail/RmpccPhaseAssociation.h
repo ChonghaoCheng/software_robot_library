@@ -78,7 +78,8 @@ rmpcc_evaluate_phase_association(
     const RmpccPhaseAssociation phaseAssociation,
     const double metricRegularization,
     const double phaseDenominatorTolerance,
-    const double rotationLength)
+    const double rotationLength,
+    const bool computeAlternativeDiagnostics = false)
 {
     RmpccPhaseAssociationState result;
 
@@ -87,6 +88,15 @@ rmpcc_evaluate_phase_association(
     result.metricCorrection =
         (errorTangent.transpose() * metric * error)(0)
         / std::max(result.metricDenominator, metricRegularization);
+
+    if(phaseAssociation == RmpccPhaseAssociation::MetricScrew
+       && !computeAlternativeDiagnostics)
+    {
+        result.correction = result.metricCorrection;
+        result.denominator = result.metricDenominator;
+        result.observable = std::isfinite(result.metricCorrection);
+        return result;
+    }
 
     result.taskError = actual.block<3,1>(0,3) - reference.block<3,1>(0,3);
     result.taskTangent =
@@ -106,29 +116,33 @@ rmpcc_evaluate_phase_association(
         throw std::invalid_argument(
             "[ERROR] [RMPCC PHASE RESIDUAL] TaskPoseFeature rotation length must be positive.");
     }
-    const Eigen::Matrix3d referenceRotation = reference.block<3,3>(0,0);
-    const Eigen::Matrix3d actualRotation = actual.block<3,3>(0,0);
-    const Eigen::Vector3d angularTangent = referenceTangent.tail<3>();
-    Eigen::Vector<double,9> featureTangent = Eigen::Vector<double,9>::Zero();
-    Eigen::Vector<double,9> featureError = Eigen::Vector<double,9>::Zero();
-    featureTangent.head<3>() = result.taskTangent;
-    featureError.head<3>() = result.taskError;
-    for(int axis = 0; axis < 2; ++axis)
+    if(phaseAssociation == RmpccPhaseAssociation::TaskPoseFeature
+       || computeAlternativeDiagnostics)
     {
-        const Eigen::Vector3d basis = Eigen::Vector3d::Unit(axis);
-        featureTangent.segment<3>(3 + 3 * axis) =
-            rotationLength * referenceRotation * angularTangent.cross(basis);
-        featureError.segment<3>(3 + 3 * axis) =
-            rotationLength
-            * (actualRotation.col(axis) - referenceRotation.col(axis));
-    }
-    result.featureDenominator = featureTangent.squaredNorm();
-    result.featureObservable = std::isfinite(result.featureDenominator)
-        && result.featureDenominator > phaseDenominatorTolerance;
-    if(result.featureObservable)
-    {
-        result.featureCorrection =
-            featureTangent.dot(featureError) / result.featureDenominator;
+        const Eigen::Matrix3d referenceRotation = reference.block<3,3>(0,0);
+        const Eigen::Matrix3d actualRotation = actual.block<3,3>(0,0);
+        const Eigen::Vector3d angularTangent = referenceTangent.tail<3>();
+        Eigen::Vector<double,9> featureTangent = Eigen::Vector<double,9>::Zero();
+        Eigen::Vector<double,9> featureError = Eigen::Vector<double,9>::Zero();
+        featureTangent.head<3>() = result.taskTangent;
+        featureError.head<3>() = result.taskError;
+        for(int axis = 0; axis < 2; ++axis)
+        {
+            const Eigen::Vector3d basis = Eigen::Vector3d::Unit(axis);
+            featureTangent.segment<3>(3 + 3 * axis) =
+                rotationLength * referenceRotation * angularTangent.cross(basis);
+            featureError.segment<3>(3 + 3 * axis) =
+                rotationLength
+                * (actualRotation.col(axis) - referenceRotation.col(axis));
+        }
+        result.featureDenominator = featureTangent.squaredNorm();
+        result.featureObservable = std::isfinite(result.featureDenominator)
+            && result.featureDenominator > phaseDenominatorTolerance;
+        if(result.featureObservable)
+        {
+            result.featureCorrection =
+                featureTangent.dot(featureError) / result.featureDenominator;
+        }
     }
 
     switch(phaseAssociation)

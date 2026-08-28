@@ -74,6 +74,28 @@ rmpcc_error_coordinate_path_tangent(
     const Eigen::Matrix<double,6,1> &error,
     const Eigen::Matrix<double,6,1> &referenceTangent)
 {
+    // J_r(e)^-1 Ad(Exp(-e)) = J_l(e)^-1.  In the controller's local
+    // operating region, evaluate the inverse left Jacobian directly with the
+    // Bernoulli series.  This preserves the complete state dependence while
+    // avoiding one SE(3) exponential and one 6x6 FullPivLU per residual call.
+    // Retain the established general implementation outside that region.
+    if(error.tail<3>().norm() <= 0.5)
+    {
+        using Matrix6d = Eigen::Matrix<double,6,6>;
+        const Matrix6d ad = RobotLibrary::Math::se3_adjoint_matrix(error);
+        const Matrix6d ad2 = ad * ad;
+        const Matrix6d ad4 = ad2 * ad2;
+        const Matrix6d ad6 = ad4 * ad2;
+        const Matrix6d ad8 = ad4 * ad4;
+        const Matrix6d ad10 = ad8 * ad2;
+        const Matrix6d ad12 = ad10 * ad2;
+        const Matrix6d inverseLeftJacobian =
+            Matrix6d::Identity() - 0.5 * ad + (1.0 / 12.0) * ad2
+            - (1.0 / 720.0) * ad4 + (1.0 / 30240.0) * ad6
+            - (1.0 / 1209600.0) * ad8 + (1.0 / 47900160.0) * ad10
+            - (691.0 / 1307674368000.0) * ad12;
+        return inverseLeftJacobian * referenceTangent;
+    }
     return RobotLibrary::Math::se3_right_jacobian_inverse(error)
            * rmpcc_transport_reference_tangent(error, referenceTangent);
 }
