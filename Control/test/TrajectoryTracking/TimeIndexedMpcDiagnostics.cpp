@@ -28,6 +28,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -152,6 +153,8 @@ void exercise(const std::string &label,
     model->update_state(position, velocity);
 
     SerialLinkParameters parameters;
+    parameters.qpsolver.maxSteps = 50;
+    parameters.qpsolver.stepSizeTolerance = 1e-5;
     Controller controller(model, "tool", parameters, 20, 0.002);
 
     const Pose startPose = controller.endpoint_pose();
@@ -176,6 +179,16 @@ void exercise(const std::string &label,
         previousInvocationIndex = d.invocationIndex;
 
         check(d.qpStatus == 1.0, label + ": a returned invocation reports qp_status 1");
+        if constexpr(std::is_same_v<Controller, SerialLinkLieAlgebraMPC>)
+        {
+            check(d.qpConverged, label + ": task-space QP explicitly converged");
+            check(!d.qpHitMaxIterations,
+                  label + ": task-space QP did not exhaust iterations");
+            check(d.qpPrimalViolation <= 1e-12,
+                  label + ": task-space QP primal violation recorded");
+        }
+        check(controller.resolved_rate_qp_diagnostics().converged,
+              label + ": resolved-rate QP explicitly converged");
         check(d.finite, label + ": all diagnostic values finite");
         check(d.commandedTwist.allFinite(), label + ": commanded twist present and finite");
         check(d.realizedTwist.allFinite(), label + ": realized twist present and finite");

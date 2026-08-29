@@ -11,6 +11,7 @@
 #include <Math/BoxAwareActiveSet.h>
 #include <Math/DiscreteIntegratorLQR.h>
 #include <Math/MathFunctions.h>
+#include <Math/QpAcceptance.h>
 
 #include <Eigen/Geometry>
 
@@ -599,8 +600,12 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     const MatrixXd emptyA(0, controlDim);
     const VectorXd emptyY(0);
+    VectorXd captureState(ERROR_DIM + 1);
+    captureState.head<ERROR_DIM>() = error0;
+    captureState(ERROR_DIM) = _pathProgress;
     write_realtime_recovery_qp_capture(
-        "mpcc", _controlStepIndex, H, f, emptyA, emptyY,
+        "mpcc", _controlStepIndex, _pathProgress, _uLast(6),
+        captureState, H, f, emptyA, emptyY,
         constraintMatrix, constraintVector, seed, optimum, qpResults);
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
@@ -614,6 +619,11 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         static_cast<double>(qpResults.maximumActiveSetSize);
     _diagnostics.qpUniqueActiveConstraints =
         static_cast<double>(qpResults.uniqueActiveConstraints);
+    // Fixed-progress remains a historical, out-of-scope research path.  The
+    // final optimized-progress controller has the strict no-fallback contract.
+    if(not _fixedProgressSchedule)
+        RobotLibrary::Math::require_qp_converged(
+            qpResults, "[ERROR] [SERIAL LINK MPCC] solve_mpcc()");
     if(optimum.size() != controlDim or not optimum.allFinite())
     {
         throw std::runtime_error(
@@ -621,6 +631,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     }
     const double constraintViolation =
         (constraintMatrix * optimum - constraintVector).maxCoeff();
+    _diagnostics.qpPrimalViolation = std::max(0.0, constraintViolation);
     if(not std::isfinite(constraintViolation) or constraintViolation > 1e-6)
     {
         throw std::runtime_error(

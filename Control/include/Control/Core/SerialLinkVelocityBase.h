@@ -10,6 +10,17 @@
 
 namespace RobotLibrary { namespace Control {
 
+struct ResolvedRateQpDiagnostics
+{
+    SolverTerminationReason terminationReason = SolverTerminationReason::MaxIterations;
+    unsigned int iterations = 0;
+    double finalStepSize = 0.0;
+    double objective = 0.0;
+    double primalViolation = 0.0;
+    bool converged = false;
+    bool finite = false;
+};
+
 /**
  * @brief Common twist-to-joint-velocity layer for velocity-level controllers.
  *
@@ -37,9 +48,16 @@ class SerialLinkVelocityBase : public SerialLinkBase
                                const Eigen::VectorXd &desiredVelocity,
                                const Eigen::VectorXd &desiredAcceleration) override;
 
+        const ResolvedRateQpDiagnostics &resolved_rate_qp_diagnostics() const
+        {
+            return _resolvedRateQpDiagnostics;
+        }
+
     protected:
         RobotLibrary::Model::Limits
         compute_control_limits(const unsigned int &jointNumber) override;
+
+        ResolvedRateQpDiagnostics _resolvedRateQpDiagnostics;
 };
 
 } } // namespace RobotLibrary::Control

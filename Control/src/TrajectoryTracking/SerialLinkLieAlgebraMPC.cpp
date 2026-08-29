@@ -8,6 +8,7 @@
 #include <Math/CondensedMPC.h>
 #include <Math/DiscreteIntegratorLQR.h>
 #include <Math/MathFunctions.h>
+#include <Math/QpAcceptance.h>
 
 #include <algorithm>
 #include <chrono>
@@ -228,13 +229,23 @@ SerialLinkLieAlgebraMPC::solve_error_mpc(
         _warmStart(i) = std::clamp(_warmStart(i), lower(i), upper(i));
     VectorXd correction = _qpSolver.solve(
         H, f, box.constraintMatrix, box.constraintVector, _warmStart);
+    const SolverResults<double> qpResults = _qpSolver.results();
+    _timeIndexedDiagnostics.qpIterations = qpResults.numberOfSteps;
+    _timeIndexedDiagnostics.qpFinalStepSize = qpResults.finalStepSize;
+    _timeIndexedDiagnostics.qpConverged =
+        qpResults.terminationReason == SolverTerminationReason::Converged;
+    _timeIndexedDiagnostics.qpHitMaxIterations =
+        qpResults.terminationReason == SolverTerminationReason::MaxIterations;
+    const double violation =
+        (box.constraintMatrix * correction - box.constraintVector).maxCoeff();
+    _timeIndexedDiagnostics.qpPrimalViolation = std::max(0.0, violation);
+    RobotLibrary::Math::require_qp_converged(
+        qpResults, "[ERROR] [SERIAL LINK LIE ALGEBRA MPC] solve_error_mpc()");
     if(correction.size() != stackedDimension or not correction.allFinite())
     {
         throw std::runtime_error(
             "[ERROR] [SERIAL LINK LIE ALGEBRA MPC] QP returned an invalid solution.");
     }
-    const double violation =
-        (box.constraintMatrix * correction - box.constraintVector).maxCoeff();
     if(not std::isfinite(violation) or violation > 1e-6)
     {
         throw std::runtime_error(

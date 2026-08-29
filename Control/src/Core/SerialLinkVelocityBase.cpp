@@ -4,6 +4,7 @@
  */
 
 #include <Control/Core/SerialLinkVelocityBase.h>
+#include <Math/QpAcceptance.h>
 
 #include <algorithm>
 #include <cmath>
@@ -51,11 +52,13 @@ SerialLinkVelocityBase::resolve_endpoint_motion(const Eigen::Vector<double,6> &e
         (_manipulability - _minManipulability) * 100 * std::sqrt(_controlFrequency);
 
     VectorXd controlVelocity = VectorXd::Zero(numJoints);
+    int activeConstraintRows = 0;
 
     if (not is_singular())
     {
         if (numJoints <= 6)
         {
+            activeConstraintRows = static_cast<int>(2 * numJoints + 1);
             controlVelocity = QPSolver<double>::solve(
                 _jacobianMatrix.transpose() * _jacobianMatrix,
                -_jacobianMatrix.transpose() * endpointMotion,
@@ -65,6 +68,7 @@ SerialLinkVelocityBase::resolve_endpoint_motion(const Eigen::Vector<double,6> &e
         }
         else
         {
+            activeConstraintRows = static_cast<int>(2 * numJoints + 1);
             if (not _redundantTaskSet)
             {
                 _redundantTask =
@@ -84,6 +88,7 @@ SerialLinkVelocityBase::resolve_endpoint_motion(const Eigen::Vector<double,6> &e
     }
     else
     {
+        activeConstraintRows = static_cast<int>(2 * numJoints);
         const double dampingFactor =
             std::pow(1.0 - _manipulability / _minManipulability, 2.0) * 0.01;
 
@@ -97,6 +102,23 @@ SerialLinkVelocityBase::resolve_endpoint_motion(const Eigen::Vector<double,6> &e
             _constraintVector.head(2 * numJoints),
             startPoint);
     }
+
+    const SolverResults<double> qpResults = QPSolver<double>::results();
+    const double primalViolation = activeConstraintRows > 0
+        ? std::max(0.0, (_constraintMatrix.topRows(activeConstraintRows) * controlVelocity
+                        - _constraintVector.head(activeConstraintRows)).maxCoeff())
+        : 0.0;
+    _resolvedRateQpDiagnostics.terminationReason = qpResults.terminationReason;
+    _resolvedRateQpDiagnostics.iterations = qpResults.numberOfSteps;
+    _resolvedRateQpDiagnostics.finalStepSize = qpResults.finalStepSize;
+    _resolvedRateQpDiagnostics.objective = qpResults.objectiveFunction;
+    _resolvedRateQpDiagnostics.primalViolation = primalViolation;
+    _resolvedRateQpDiagnostics.converged =
+        qpResults.terminationReason == SolverTerminationReason::Converged;
+    _resolvedRateQpDiagnostics.finite = controlVelocity.allFinite();
+    RobotLibrary::Math::require_qp_result_accepted(
+        qpResults, controlVelocity, primalViolation, 1e-6,
+        "[ERROR] [SERIAL LINK VELOCITY] resolve_endpoint_motion()");
 
     return controlVelocity;
 }

@@ -10,6 +10,8 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <set>
+#include <sstream>
 #include <string>
 
 namespace RobotLibrary { namespace Control {
@@ -41,6 +43,9 @@ inline void realtime_recovery_write_vector(
 inline void write_realtime_recovery_qp_capture(
     const std::string &controller,
     const std::uint64_t controlStep,
+    const double progress,
+    const double progressRate,
+    const Eigen::Ref<const Eigen::VectorXd> &nominalState,
     const Eigen::Ref<const Eigen::MatrixXd> &H,
     const Eigen::Ref<const Eigen::VectorXd> &f,
     const Eigen::Ref<const Eigen::MatrixXd> &A,
@@ -51,14 +56,34 @@ inline void write_realtime_recovery_qp_capture(
     const Eigen::Ref<const Eigen::VectorXd> &solution,
     const SolverResults<double> &results)
 {
-    const char *rootText = std::getenv("ROBOT_LIBRARY_REALTIME_RECOVERY_QP_CAPTURE_DIR");
+    const char *qualificationRoot =
+        std::getenv("ROBOT_LIBRARY_QP_QUAL_CAPTURE_DIR");
+    const bool qualification = qualificationRoot != nullptr && *qualificationRoot != '\0';
+    const char *rootText = qualification ? qualificationRoot
+        : std::getenv("ROBOT_LIBRARY_REALTIME_RECOVERY_QP_CAPTURE_DIR");
     if(rootText == nullptr || *rootText == '\0') return;
 
     static std::map<std::string, unsigned int> captures;
-    const bool regular = controlStep == 1000 || controlStep == 5000 || controlStep == 10000;
+    bool regular = controlStep == 1000 || controlStep == 5000 || controlStep == 10000;
+    if(qualification)
+    {
+        static const std::set<std::uint64_t> qualificationSteps = []
+        {
+            std::set<std::uint64_t> values;
+            const char *text = std::getenv("ROBOT_LIBRARY_QP_QUAL_CAPTURE_STEPS");
+            if(text == nullptr) return values;
+            std::stringstream stream(text);
+            std::string token;
+            while(std::getline(stream, token, ','))
+                if(!token.empty()) values.insert(std::stoull(token));
+            return values;
+        }();
+        regular = qualificationSteps.count(controlStep) != 0;
+    }
     const bool iterationLimited =
         results.terminationReason == SolverTerminationReason::MaxIterations;
-    if((!regular && !iterationLimited) || captures[controller] >= 16) return;
+    if(!regular && !iterationLimited) return;
+    if(!qualification && captures[controller] >= 16) return;
 
     const std::string reason = iterationLimited ? "max_iterations" : "regular";
     const std::filesystem::path directory = std::filesystem::path(rootText) / controller /
@@ -71,13 +96,18 @@ inline void write_realtime_recovery_qp_capture(
     realtime_recovery_write_matrix(directory / "B.csv", B);
     realtime_recovery_write_vector(directory / "z.csv", z);
     realtime_recovery_write_vector(directory / "seed.csv", seed);
+    realtime_recovery_write_vector(directory / "nominal_state.csv", nominalState);
     realtime_recovery_write_vector(directory / "production_solution.csv", solution);
     std::ofstream metadata(directory / "metadata.json");
     metadata << std::setprecision(17)
              << "{\n"
-             << "  \"schema\": \"realtime_recovery_02_frozen_qp_v1\",\n"
+             << "  \"schema\": \""
+             << (qualification ? "qp_production_qualification_01_frozen_qp_v1"
+                               : "realtime_recovery_02_frozen_qp_v1") << "\",\n"
              << "  \"controller\": \"" << controller << "\",\n"
              << "  \"control_step_index_zero_based\": " << controlStep << ",\n"
+             << "  \"progress\": " << progress << ",\n"
+             << "  \"progress_rate_seed\": " << progressRate << ",\n"
              << "  \"production_number_of_steps\": " << results.numberOfSteps << ",\n"
              << "  \"production_termination_reason\": \""
              << (iterationLimited ? "MaxIterations" : "Converged") << "\",\n"

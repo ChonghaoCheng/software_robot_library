@@ -30,6 +30,11 @@ struct TimeIndexedMpcDiagnostics
     double controllerDt = 0.0;                  ///< Prediction/integration dt used this invocation.
     double referenceTime = 0.0;                 ///< Clamped trajectory time the reference was queried at.
     double qpStatus = 1.0;                      ///< 1.0 = solved and returned; failure throws instead.
+    double qpIterations = 0.0;
+    double qpFinalStepSize = 0.0;
+    double qpPrimalViolation = 0.0;
+    bool qpConverged = false;
+    bool qpHitMaxIterations = false;
     Eigen::Vector<double,6> commandedTwist =
         Eigen::Vector<double,6>::Zero();        ///< Post-clamp endpoint twist in base axes.
     Eigen::Vector<double,6> clampFrameTwist =

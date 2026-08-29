@@ -65,6 +65,11 @@ if(BUILD_TESTING)
         test/TrajectoryTracking/RealtimeRecoveryQpReplay.cpp)
     target_link_libraries(realtime_recovery_qp_replay PRIVATE Control)
 
+    # Offline replay of the exact production BoxAwareActiveSet implementation.
+    add_executable(qp_production_qualification_replay
+        test/TrajectoryTracking/QpProductionQualificationReplay.cpp)
+    target_link_libraries(qp_production_qualification_replay PRIVATE Control)
+
     # Deterministic theory-to-mechanism study. Formal execution supplies an
     # output directory; keeping it out of CTest avoids regenerating evidence
     # during ordinary unit-test runs.

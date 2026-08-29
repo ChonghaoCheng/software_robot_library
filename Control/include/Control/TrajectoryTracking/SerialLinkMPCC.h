@@ -72,6 +72,7 @@ struct MpccDiagnostics
     double qpIterations = 0.0;
     double qpFinalStepSize = 0.0;
     double qpObjective = 0.0;
+    double qpPrimalViolation = 0.0;
     bool qpConverged = false;
     bool qpHitMaxIterations = false;
     double qpActiveSetChanges = 0.0;

@@ -15,6 +15,7 @@
 #include "detail/RealtimeRecoveryQpCapture.h"
 #include <Math/MathFunctions.h>
 #include <Math/BoxAwareActiveSet.h>
+#include <Math/QpAcceptance.h>
 
 #include <Eigen/Geometry>
 
@@ -1512,7 +1513,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     }
     _diagnostics.qpSolveTimeSeconds = timingSeconds(solveStart);
     write_realtime_recovery_qp_capture(
-        "rmpcc", controlStepIndex, H, f, Aeq, yeq, Bineq, zineq,
+        "rmpcc", controlStepIndex, _pathProgress, _lastProgressRate,
+        e0, H, f, Aeq, yeq, Bineq, zineq,
         zNominal, zOpt, qpResults);
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
@@ -1526,6 +1528,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.qpUniqueActiveConstraints =
         static_cast<double>(qpResults.uniqueActiveConstraints);
     const auto postQpStart = timingNow();
+    if(qpResults.terminationReason != SolverTerminationReason::Converged)
+    {
+        write_n125_qp_snapshot(
+            H, f, Aeq, yeq, Bineq, zineq, zNominal, lower, upper, fixedProgressRates,
+            e0, nominalStates, nominalInputs, zOpt, qpResults,
+            controlStepIndex, _pathProgress, _scheduleProgressLimit, remaining,
+            scheduleRemaining, dt);
+    }
+    // Fixed-progress remains a historical, out-of-scope research path.  The
+    // final optimized-progress controller has the strict no-fallback contract.
+    if(not _fixedProgressSchedule)
+        RobotLibrary::Math::require_qp_converged(
+            qpResults, "[ERROR] [SERIAL LINK RMPCC] solve_rmpcc()");
     if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
         throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");

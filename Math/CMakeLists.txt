@@ -18,6 +18,10 @@ if(BUILD_TESTING)
     target_link_libraries(qp_active_set_test PRIVATE Math)
     add_test(NAME qp_active_set_test COMMAND qp_active_set_test)
 
+    add_executable(qp_acceptance_test test/QpAcceptance.cpp)
+    target_link_libraries(qp_acceptance_test PRIVATE Math)
+    add_test(NAME qp_acceptance_test COMMAND qp_acceptance_test)
+
     add_executable(se3_right_jacobian_test test/SE3RightJacobian.cpp)
     target_link_libraries(se3_right_jacobian_test PRIVATE Math)
     add_test(NAME se3_right_jacobian_test COMMAND se3_right_jacobian_test)
