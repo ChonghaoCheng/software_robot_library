@@ -15,7 +15,14 @@
 
 #include <Eigen/Dense>                                                                              // Linear algebra and matrix decomposition
 #include <iostream>                                                                                 // cerr, cout
+#include <limits>
 #include <vector>                                                                                   // vector
+
+enum class SolverTerminationReason
+{
+    Converged,
+    MaxIterations
+};
 
 /**
  * @brief A data structure for passing options to the QP solver in a single argument.
@@ -43,6 +50,10 @@ struct SolverResults
     DataType finalStepSize     = std::numeric_limits<float>::max();                                 ///< The final step size at which the algorithm terminated
     DataType objectiveFunction = std::numeric_limits<float>::max();                                 ///< The magnitude of the error for the problem
     Eigen::Vector<DataType,Eigen::Dynamic> solution;                                                ///< The final / last solution when the solver was run
+    SolverTerminationReason terminationReason = SolverTerminationReason::MaxIterations;
+    unsigned int activeSetChanges = 0;
+    unsigned int maximumActiveSetSize = 0;
+    unsigned int uniqueActiveConstraints = 0;
 };
 
 /**
@@ -656,10 +667,16 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
     int dim = x0.size();
     int numEqualConstraints   = A.rows();
     int numInequalConstraints = B.rows();
+
+    _results.terminationReason = SolverTerminationReason::MaxIterations;
+    _results.activeSetChanges = 0;
+    _results.maximumActiveSetSize = 0;
+    _results.uniqueActiveConstraints = 0;
     
     std::vector<int> activeSet;
     std::vector<int> inactiveSet;
     std::vector<int> previousActiveSet;
+    std::vector<bool> constraintSeen(static_cast<std::size_t>(numInequalConstraints), false);
     activeSet.reserve(static_cast<std::size_t>(numInequalConstraints));
     inactiveSet.reserve(static_cast<std::size_t>(numInequalConstraints));
     previousActiveSet.reserve(static_cast<std::size_t>(numInequalConstraints));
@@ -685,9 +702,14 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
     {
         DataType distance = z(i) - B.row(i).dot(x);
         
-        if (distance <= 0.0)   activeSet.push_back(i);
+        if (distance <= 0.0)
+        {
+            activeSet.push_back(i);
+            constraintSeen[static_cast<std::size_t>(i)] = true;
+        }
         else                 inactiveSet.push_back(i);
     }
+    _results.maximumActiveSetSize = static_cast<unsigned int>(activeSet.size());
     
     if (activeSet.size() > dim)
     {
@@ -760,8 +782,13 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
             {
                 inactiveSet.push_back(activeSet[freeConstraint]);                                   
                 activeSet.erase(activeSet.begin() + freeConstraint);
+                ++_results.activeSetChanges;
             }
-            else break;                                                                             // Optimal solution found
+            else
+            {
+                _results.terminationReason = SolverTerminationReason::Converged;
+                break;                                                                              // Optimal solution found
+            }
         }
         else
         {
@@ -794,6 +821,11 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
             if (alpha < 1.0)
             {
                 activeSet.push_back(blockingConstraint);
+                constraintSeen[static_cast<std::size_t>(blockingConstraint)] = true;
+                _results.maximumActiveSetSize = std::max(
+                    _results.maximumActiveSetSize,
+                    static_cast<unsigned int>(activeSet.size()));
+                ++_results.activeSetChanges;
                 
                 inactiveSet.erase(std::remove(inactiveSet.begin(), inactiveSet.end(), blockingConstraint),
                                   inactiveSet.end());
@@ -809,6 +841,8 @@ QPSolver<DataType>::active_set(const Eigen::Matrix<DataType, Eigen::Dynamic, Eig
      _results.finalStepSize     = stepSize;
      _results.objectiveFunction = x.transpose() * (H * x / 2 + f);
      _results.solution          = x;
+     _results.uniqueActiveConstraints = static_cast<unsigned int>(
+         std::count(constraintSeen.begin(), constraintSeen.end(), true));
      
      return x;  
 }
@@ -961,7 +995,6 @@ QPSolver<DataType>::interior_point(const Eigen::Matrix<DataType, Eigen::Dynamic,
     _results.finalStepSize     = stepSize;
     _results.objectiveFunction = x.transpose()*(0.5 * H * x + f);
     _results.solution          = x;
-
     return x;
 }
   

@@ -1,4 +1,5 @@
 #include <Math/QPSolver.h>
+#include <Math/BoxAwareActiveSet.h>
 
 #include <Eigen/Core>
 
@@ -83,9 +84,32 @@ bool active_bound_optimum()
     Eigen::Vector<double, 1> z;
     z << 0.25;
     Eigen::Vector2d x0(0.0, 0.0);
-    const Eigen::Vector2d x = solver().solve(H, f, B, z, x0);
+    auto qp = solver();
+    const Eigen::Vector2d x = qp.solve(H, f, B, z, x0);
     Eigen::Vector2d expected(0.25, -0.5);
-    return near(x, expected, 1e-8) && check_kkt(H, f, B, z, x, 1e-8);
+    return near(x, expected, 1e-8) && check_kkt(H, f, B, z, x, 1e-8)
+        && qp.results().terminationReason == SolverTerminationReason::Converged;
+}
+
+bool distinguishes_iteration_exhaustion()
+{
+    Eigen::Matrix2d H = Eigen::Matrix2d::Identity();
+    Eigen::Vector2d f(-2.0, 0.5);
+    Eigen::Matrix<double, 1, 2> B;
+    B << 1.0, 0.0;
+    Eigen::Vector<double, 1> z;
+    z << 0.25;
+    Eigen::Vector2d x0(0.0, 0.0);
+
+    SolverOptions<double> options;
+    options.method = "active set";
+    options.stepSizeTolerance = 1e-10;
+    options.maxSteps = 1;
+    QPSolver<double> qp(options);
+    (void)qp.solve(H, f, B, z, x0);
+    const auto result = qp.results();
+    return result.numberOfSteps == 1
+        && result.terminationReason == SolverTerminationReason::MaxIterations;
 }
 
 bool releases_initially_active_constraint()
@@ -149,6 +173,28 @@ bool random_box_qps()
     return true;
 }
 
+bool box_aware_dense_constraint_matches_high_accuracy_reference()
+{
+    Eigen::Matrix2d H; H << 2.0, 0.2, 0.2, 1.5;
+    Eigen::Vector2d f(-2.0, -1.5);
+    Eigen::Matrix<double,5,2> B;
+    B << 1,0, 0,1, -1,0, 0,-1, 1,1;
+    Eigen::Matrix<double,5,1> z; z << 1,1, 1,1, 1.2;
+    Eigen::Vector2d seed(0.5,0.5);
+    SolverOptions<double> highOptions;
+    highOptions.method="active set"; highOptions.stepSizeTolerance=1e-12;
+    highOptions.maxSteps=200;
+    QPSolver<double> highSolver(highOptions);
+    const Eigen::VectorXd reference=highSolver.solve(H,f,B,z,seed);
+    SolverOptions<double> productionOptions;
+    productionOptions.method="active set"; productionOptions.stepSizeTolerance=1e-5;
+    productionOptions.maxSteps=50;
+    const auto candidate=solve_box_aware_active_set(H,f,B,z,seed,productionOptions);
+    return candidate.solver.terminationReason==SolverTerminationReason::Converged
+        && near(candidate.solution,reference,1e-10)
+        && check_kkt(H,f,B,z,candidate.solution,1e-8);
+}
+
 } // namespace
 
 int main()
@@ -157,5 +203,7 @@ int main()
     if(!active_bound_optimum()) return 2;
     if(!releases_initially_active_constraint()) return 3;
     if(!random_box_qps()) return 4;
+    if(!distinguishes_iteration_exhaustion()) return 5;
+    if(!box_aware_dense_constraint_matches_high_accuracy_reference()) return 6;
     return 0;
 }

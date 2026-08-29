@@ -83,6 +83,7 @@ struct RmpccParameters
     double rtiFiniteDifferenceStep   = 1e-6;     ///< Perturbation used for stage-wise RTI Jacobians
     double hessianRegularization     = 1e-8;     ///< Tikhonov term added to the QP Hessian
     bool enableDetailedDiagnostics   = true;     ///< Reconstruct research-only post-QP horizon diagnostics
+    bool enableTimingDiagnostics     = false;    ///< Collect detailed steady-clock substages for timing experiments
 
     // Progress shaping
     double progressReward            = 2e-4;     ///< Stage-integral reward encouraging forward progress
@@ -152,6 +153,13 @@ struct RmpccDiagnostics
     double qpFirstTwistGradientNorm = 0.0;///< ||(H z + f)_u0||; zero for an interior optimum
     double qpStepNorm           = 0.0;  ///< ||z_opt - z_warm||
     double qpSolveTimeSeconds   = 0.0;  ///< Wall time spent in the task-space QP solve
+    double qpIterations         = 0.0;
+    double qpFinalStepSize      = 0.0;
+    bool qpConverged            = false;
+    bool qpHitMaxIterations     = false;
+    double qpActiveSetChanges   = 0.0;
+    double qpMaximumActiveSetSize = 0.0;
+    double qpUniqueActiveConstraints = 0.0;
     double referencePoseQueryTimeSeconds = 0.0;
     double referenceTangentQueryTimeSeconds = 0.0;
     std::uint64_t referencePoseQueryCount = 0;
@@ -167,6 +175,7 @@ struct RmpccDiagnostics
     double pathVelocityObjectiveTimeSeconds = 0.0;
     double finalHessianAssemblyTimeSeconds = 0.0;
     double postQpTimeSeconds = 0.0;
+    double resolvedRateTimeSeconds = 0.0;
     std::uint64_t stateLinearizationHash = 0; ///< PERF-01 opt-in numerical audit
     std::uint64_t residualLinearizationHash = 0; ///< PERF-01 opt-in numerical audit
     std::uint64_t hessianHash = 0; ///< PERF-01 opt-in numerical audit
@@ -340,6 +349,12 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         const RmpccDiagnostics&
         diagnostics() const { return _diagnostics; }
 
+        /** Enable detailed steady-clock substages for timing experiments. */
+        void set_timing_diagnostics(bool enabled)
+        {
+            _rmpcc.enableTimingDiagnostics = enabled;
+        }
+
         /** Exact experiment contract for logs and pre-run verification. */
         std::string
         objective_description() const;
@@ -352,6 +367,7 @@ class SerialLinkRMPCC : public SerialLinkVelocityBase
         bool _deriveProgressRateMax = true;
 
         QPSolver<double> _qpSolver;
+        SolverOptions<double> _qpOptions;
 
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
         bool _trajectorySet = false;

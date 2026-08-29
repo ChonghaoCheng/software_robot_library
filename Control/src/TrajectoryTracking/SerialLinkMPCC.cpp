@@ -6,13 +6,16 @@
 #include <Control/TrajectoryTracking/SerialLinkMPCC.h>
 #include "detail/ProgressSchedule.h"
 #include "detail/RmpccCostGeometry.h"
+#include "detail/RealtimeRecoveryQpCapture.h"
 #include <Math/CondensedMPC.h>
+#include <Math/BoxAwareActiveSet.h>
 #include <Math/DiscreteIntegratorLQR.h>
 #include <Math/MathFunctions.h>
 
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -29,7 +32,8 @@ SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTre
 : SerialLinkVelocityBase(model, endpointName, parameters),
   _horizon((horizon == 0) ? 1 : horizon),
   _dt((dt > 0.0) ? dt : 1.0 / std::max(parameters.controlFrequency, 1u)),
-  _qpSolver(parameters.qpsolver)
+  _qpSolver(parameters.qpsolver),
+  _qpOptions(parameters.qpsolver)
 {
     // The action-loop frequency is shared by all velocity controllers. The
     // prediction step follows it by default, but an explicit dt may still be
@@ -152,6 +156,8 @@ SerialLinkMPCC::set_trajectory_frame(
 Eigen::VectorXd
 SerialLinkMPCC::step(const double dt)
 {
+    using Clock = std::chrono::steady_clock;
+    const auto totalStart = _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     if(not _trajectorySet)
     {
         throw std::runtime_error(
@@ -192,7 +198,14 @@ SerialLinkMPCC::step(const double dt)
     baseTwist.tail<3>() = referenceRotation * optimalControl.segment<3>(3);
     _pathProgress = std::clamp(_pathProgress + dt * optimalControl(6), 0.0, 1.0);
     _diagnostics.nextProgress = _pathProgress;
+    const auto resolvedRateStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     const Eigen::VectorXd jointCommand = resolve_endpoint_twist(baseTwist);
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.resolvedRateTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - resolvedRateStart).count();
+    }
     const Eigen::Vector<double,6> realizedBaseTwist = _jacobianMatrix * jointCommand;
     _diagnostics.realizedBodyTwist.head<3>() =
         referenceRotation.transpose() * realizedBaseTwist.head<3>();
@@ -200,6 +213,12 @@ SerialLinkMPCC::step(const double dt)
         referenceRotation.transpose() * realizedBaseTwist.tail<3>();
     _diagnostics.twistRealizationError =
         (_diagnostics.realizedBodyTwist - _diagnostics.bodyTwist).norm();
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.totalStepTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - totalStart).count();
+    }
+    ++_controlStepIndex;
     return jointCommand;
 }
 
@@ -218,6 +237,10 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
 {
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
+    using Clock = std::chrono::steady_clock;
+
+    const auto referencePreparationStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
 
     const int N = static_cast<int>(_horizon);
     const int errorDim = ERROR_DIM * N;
@@ -292,17 +315,46 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
                               0.0,
                               1.0);
     }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.referencePreparationTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - referencePreparationStart).count();
+    }
 
     // Linearised error prediction:
     // e_j = e_0 + dt * sum_{i<=j}(u_i - tau(s_i) * sdot_i).
     MatrixXd errorResponse = MatrixXd::Zero(errorDim, controlDim);
     VectorXd errorOffset = VectorXd::Zero(errorDim);
     MatrixXd errorWeight = MatrixXd::Zero(errorDim, errorDim);
+    const auto predictionStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     for(int stage = 0; stage < N; ++stage)
     {
         const int row = stage * ERROR_DIM;
         errorOffset.segment<ERROR_DIM>(row) = error0;
 
+        for(int input = 0; input <= stage; ++input)
+        {
+            const int column = input * NU;
+            errorResponse.block<ERROR_DIM,ERROR_DIM>(row, column) +=
+                _dt * Eigen::Matrix<double,ERROR_DIM,ERROR_DIM>::Identity();
+            errorResponse.block<ERROR_DIM,1>(row, column + 6) +=
+                -_dt * referenceMotionJacobians[static_cast<size_t>(input)];
+            errorOffset.segment<ERROR_DIM>(row) -=
+                _dt * referenceMotionOffsets[static_cast<size_t>(input)];
+        }
+    }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.errorPredictionTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - predictionStart).count();
+    }
+
+    const auto costWeightStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
+    for(int stage = 0; stage < N; ++stage)
+    {
+        const int row = stage * ERROR_DIM;
         const Eigen::Vector<double,ERROR_DIM> &tangent =
             pathTangents[static_cast<size_t>(stage)];
         const Eigen::Matrix3d positionLagProjection =
@@ -334,19 +386,15 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         errorWeight.block<3,3>(row, row) = positionWeight;
         errorWeight.block<3,3>(row + 3, row + 3) =
             orientationWeight * Eigen::Matrix3d::Identity();
-
-        for(int input = 0; input <= stage; ++input)
-        {
-            const int column = input * NU;
-            errorResponse.block<ERROR_DIM,ERROR_DIM>(row, column) +=
-                _dt * Eigen::Matrix<double,ERROR_DIM,ERROR_DIM>::Identity();
-            errorResponse.block<ERROR_DIM,1>(row, column + 6) +=
-                -_dt * referenceMotionJacobians[static_cast<size_t>(input)];
-            errorOffset.segment<ERROR_DIM>(row) -=
-                _dt * referenceMotionOffsets[static_cast<size_t>(input)];
-        }
+    }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.costWeightTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - costWeightStart).count();
     }
 
+    const auto pathVelocityStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     const bool feedforwardCorrection =
         _ablationProfile == MpccAblationProfile::FeedforwardCorrection;
     const bool optimizedProgress =
@@ -414,7 +462,14 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         pathVelocityOffset.segment<ERROR_DIM>(row) =
             -referenceMotionOffsets[static_cast<size_t>(stage)];
     }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.pathVelocityObjectiveTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - pathVelocityStart).count();
+    }
 
+    const auto hessianStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     MatrixXd difference = MatrixXd::Zero(controlDim, controlDim);
     for(int stage = 0; stage < N; ++stage)
     {
@@ -448,7 +503,14 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     {
         f(stage * NU + 6) -= progressReward * _dt;
     }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.hessianAssemblyTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - hessianStart).count();
+    }
 
+    const auto constraintStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
     VectorXd lower = VectorXd::Zero(controlDim);
     VectorXd upper = VectorXd::Zero(controlDim);
     for(int stage = 0; stage < N; ++stage)
@@ -507,12 +569,51 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     };
 
     VectorXd seed = make_feasible(_warmStart);
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.constraintConstructionTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - constraintStart).count();
+    }
     _diagnostics.qpStatus = 0.0;
-    VectorXd optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
-    const SolverResults<double> qpResults = _qpSolver.results();
+    const auto qpStart = _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
+    VectorXd optimum;
+    SolverResults<double> qpResults;
+    if(_fixedProgressSchedule)
+    {
+        optimum = _qpSolver.solve(H, f, constraintMatrix, constraintVector, seed);
+        qpResults = _qpSolver.results();
+    }
+    else
+    {
+        const auto specialized = solve_box_aware_active_set(
+            H, f, constraintMatrix, constraintVector, seed, _qpOptions);
+        optimum = specialized.solution;
+        qpResults = specialized.solver;
+    }
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.qpSolveTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - qpStart).count();
+    }
+    const auto postQpStart =
+        _timingDiagnosticsEnabled ? Clock::now() : Clock::time_point{};
+    const MatrixXd emptyA(0, controlDim);
+    const VectorXd emptyY(0);
+    write_realtime_recovery_qp_capture(
+        "mpcc", _controlStepIndex, H, f, emptyA, emptyY,
+        constraintMatrix, constraintVector, seed, optimum, qpResults);
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
     _diagnostics.qpObjective = qpResults.objectiveFunction;
+    _diagnostics.qpConverged =
+        qpResults.terminationReason == SolverTerminationReason::Converged;
+    _diagnostics.qpHitMaxIterations =
+        qpResults.terminationReason == SolverTerminationReason::MaxIterations;
+    _diagnostics.qpActiveSetChanges = static_cast<double>(qpResults.activeSetChanges);
+    _diagnostics.qpMaximumActiveSetSize =
+        static_cast<double>(qpResults.maximumActiveSetSize);
+    _diagnostics.qpUniqueActiveConstraints =
+        static_cast<double>(qpResults.uniqueActiveConstraints);
     if(optimum.size() != controlDim or not optimum.allFinite())
     {
         throw std::runtime_error(
@@ -557,6 +658,11 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             firstPathPose,
             _trajectory.tangent_at_progress(_pathProgress),
             firstControl(6), _dt, parentTransform(0), parentTransform(1));
+    if(_timingDiagnosticsEnabled)
+    {
+        _diagnostics.postQpTimeSeconds =
+            std::chrono::duration<double>(Clock::now() - postQpStart).count();
+    }
     return firstControl;
 }
 

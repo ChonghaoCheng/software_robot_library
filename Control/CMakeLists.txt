@@ -61,6 +61,10 @@ if(BUILD_TESTING)
         test/TrajectoryTracking/N125QpActiveSetReplay.cpp)
     target_link_libraries(n125_qp_active_set_replay PRIVATE Control)
 
+    add_executable(realtime_recovery_qp_replay
+        test/TrajectoryTracking/RealtimeRecoveryQpReplay.cpp)
+    target_link_libraries(realtime_recovery_qp_replay PRIVATE Control)
+
     # Deterministic theory-to-mechanism study. Formal execution supplies an
     # output directory; keeping it out of CTest avoids regenerating evidence
     # during ordinary unit-test runs.

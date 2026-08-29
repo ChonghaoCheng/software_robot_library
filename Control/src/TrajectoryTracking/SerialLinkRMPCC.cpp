@@ -12,7 +12,9 @@
 #include "detail/RmpccQpConstraints.h"
 #include "detail/RmpccReferenceMotion.h"
 #include "detail/RmpccResidualLinearization.h"
+#include "detail/RealtimeRecoveryQpCapture.h"
 #include <Math/MathFunctions.h>
+#include <Math/BoxAwareActiveSet.h>
 
 #include <Eigen/Geometry>
 
@@ -219,6 +221,9 @@ void write_n125_qp_snapshot(
              << "  \"nominal_max_violation\": " << nominalViolation << ",\n"
              << "  \"returned_max_violation\": " << returnedViolation << ",\n"
              << "  \"solver_number_of_steps\": " << solverResults.numberOfSteps << ",\n"
+             << "  \"solver_termination_reason\": \""
+             << (solverResults.terminationReason == SolverTerminationReason::Converged
+                 ? "converged" : "max_iterations") << "\",\n"
              << "  \"solver_final_step_size\": " << solverResults.finalStepSize << ",\n"
              << "  \"solver_objective\": " << solverResults.objectiveFunction << "\n"
              << "}\n";
@@ -235,6 +240,7 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
   _deriveProgressRateMin(rmpcc.progressRateMin <= 0.0),
   _deriveProgressRateMax(rmpcc.progressRateMax <= 0.0),
   _qpSolver(parameters.qpsolver),
+  _qpOptions(parameters.qpsolver),
   _poseArcTable(std::make_shared<RmpccPoseArcTable>())
 {
     if(_rmpcc.horizonSteps < 1)
@@ -610,7 +616,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     using Eigen::MatrixXd;
     using Eigen::VectorXd;
 
-    const auto totalSolveStart = std::chrono::steady_clock::now();
+    using TimingClock = std::chrono::steady_clock;
+    const bool measureTiming = _rmpcc.enableTimingDiagnostics;
+    const auto timingNow = [&]()
+    {
+        return measureTiming ? TimingClock::now() : TimingClock::time_point{};
+    };
+    const auto timingSeconds = [&](const TimingClock::time_point start)
+    {
+        return measureTiming
+            ? std::chrono::duration<double>(TimingClock::now() - start).count()
+            : 0.0;
+    };
+    const auto totalSolveStart = timingNow();
     double referencePoseQueryTime = 0.0;
     double referenceTangentQueryTime = 0.0;
     std::uint64_t referencePoseQueryCount = 0;
@@ -639,34 +657,31 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     };
     const auto referenceTransform = [&](const double progress)
     {
-        const auto start = std::chrono::steady_clock::now();
+        const auto start = timingNow();
         ++referencePoseRequestCount;
         const std::uint64_t key = progressKey(progress);
         const auto cached = referenceTransformCache.find(key);
         if(cached != referenceTransformCache.end())
         {
-            referencePoseQueryTime += std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start).count();
+            referencePoseQueryTime += timingSeconds(start);
             return cached->second;
         }
         const Eigen::Matrix4d value =
             reference_transform_in_trajectory_frame(progress);
         referenceTransformCache.emplace(key, value);
-        referencePoseQueryTime += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start).count();
+        referencePoseQueryTime += timingSeconds(start);
         ++referencePoseQueryCount;
         return value;
     };
     const auto referenceTangent = [&](const double progress)
     {
-        const auto start = std::chrono::steady_clock::now();
+        const auto start = timingNow();
         ++referenceTangentRequestCount;
         const std::uint64_t key = progressKey(progress);
         const auto cached = referenceTangentCache.find(key);
         if(cached != referenceTangentCache.end())
         {
-            referenceTangentQueryTime += std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start).count();
+            referenceTangentQueryTime += timingSeconds(start);
             return cached->second;
         }
         const Eigen::Vector<double,TWIST_DIM> value =
@@ -675,8 +690,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             : rmpcc_centred_geometric_tangent(
                   progress, _rmpcc.geometricTangentStep, referenceTransform);
         referenceTangentCache.emplace(key, value);
-        referenceTangentQueryTime += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start).count();
+        referenceTangentQueryTime += timingSeconds(start);
         ++referenceTangentQueryCount;
         return value;
     };
@@ -787,7 +801,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const double progressRateMax = _rmpcc.progressRateMax;
     const double progressRateMin = std::min(_rmpcc.progressRateMin, progressRateMax);
 
-    const auto constraintStart = std::chrono::steady_clock::now();
+    const auto constraintStart = timingNow();
     VectorXd lower = VectorXd::Zero(variableDim);
     VectorXd upper = VectorXd::Zero(variableDim);
     const bool relaxForCompletion =
@@ -818,9 +832,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const VectorXd &yeq = qpConstraints.yeq;
     const MatrixXd &Bineq = qpConstraints.Bineq;
     const VectorXd &zineq = qpConstraints.zineq;
-    _diagnostics.constraintConstructionTimeSeconds =
-        std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - constraintStart).count();
+    _diagnostics.constraintConstructionTimeSeconds = timingSeconds(constraintStart);
     const auto propagate = [&](const RmpccStateVector &state,
                                const RmpccInputVector &input,
                                const int stage)
@@ -867,7 +879,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
 
     _diagnostics.warmStartInvariantError = 0.0;
     _diagnostics.warmStartInputBoundActive = 0.0;
-    const auto warmStartPredictionStart = std::chrono::steady_clock::now();
+    const auto warmStartPredictionStart = timingNow();
     if(_warmStart.size() != variableDim)
     {
         _warmStart = VectorXd::Zero(variableDim);
@@ -938,8 +950,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             guessState = nextGuessState;
         }
     }
-    warmStartPredictionTime = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - warmStartPredictionStart).count();
+    warmStartPredictionTime = timingSeconds(warmStartPredictionStart);
 
     const VectorXd zNominal =
         clipped_warm_start(_warmStart, lower, upper, dt, remaining, scheduleRemaining);
@@ -1007,7 +1018,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         nominalInput(6) = zNominal(sOffset);
         stageStartStateSensitivities[static_cast<size_t>(stage)] = stateSensitivity;
 
-        const auto rolloutStart = std::chrono::steady_clock::now();
+        const auto rolloutStart = timingNow();
         const RmpccStageLinearization linearization = linearize(
             nominalStates[static_cast<size_t>(stage)], nominalInput, stage);
         if(numericalAudit)
@@ -1025,9 +1036,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 linearization.inputJacobian.col(component);
         }
         stateSensitivity.col(sOffset) += linearization.inputJacobian.col(6);
-        rolloutLinearizationTime += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - rolloutStart).count();
-        const auto residualStart = std::chrono::steady_clock::now();
+        rolloutLinearizationTime += timingSeconds(rolloutStart);
+        const auto residualStart = timingNow();
 
         const int row = stage * TWIST_DIM;
         const MatrixXd stageSensitivity = stateSensitivity.topRows(TWIST_DIM);
@@ -1323,13 +1333,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 }
             }
         }
-        const double stageResidualTime = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - residualStart).count();
+        const double stageResidualTime = timingSeconds(residualStart);
         residualLinearizationTime += stageResidualTime;
         residualHessianTime += stageResidualTime;
     }
 
-    const auto finalAssemblyStart = std::chrono::steady_clock::now();
+    const auto finalAssemblyStart = timingNow();
     MatrixXd H;
     VectorXd f;
     if(assembleFrozenProjection)
@@ -1355,7 +1364,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         const RmpccStateVector &stageState = nominalStates[static_cast<size_t>(stage)];
         const Eigen::Matrix<double,TWIST_DIM,TWIST_DIM> pathVelocityWeight =
             _rmpcc.pathVelocityScale * _rmpcc.pathVelocityWeight;
-        const auto pathVelocityObjectiveStart = std::chrono::steady_clock::now();
+        const auto pathVelocityObjectiveStart = timingNow();
         if(finiteStageExact
            || _rmpcc.referenceMotion == RmpccReferenceMotion::StageConsistent
            || parentRepairActive)
@@ -1414,8 +1423,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 2.0 * (transportedTangent.transpose()
                        * pathVelocityWeight * transportedTangent)(0);
         }
-        pathVelocityObjectiveTime += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - pathVelocityObjectiveStart).count();
+        pathVelocityObjectiveTime += timingSeconds(pathVelocityObjectiveStart);
 
         if(_rmpcc.progressRateWeight > 0.0)
         {
@@ -1482,19 +1490,42 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         hash_eigen(linearTermHash, f);
         _diagnostics.linearTermHash = linearTermHash;
     }
-    const double completeFinalAssemblyTime = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - finalAssemblyStart).count();
+    const double completeFinalAssemblyTime = timingSeconds(finalAssemblyStart);
     finalHessianAssemblyTime = std::max(
         0.0, completeFinalAssemblyTime - pathVelocityObjectiveTime);
     residualHessianTime += completeFinalAssemblyTime;
 
-    const auto solveStart = std::chrono::steady_clock::now();
-    VectorXd zOpt = _fixedProgressSchedule
-        ? _qpSolver.solve(H, f, Aeq, yeq, Bineq, zineq, zNominal)
-        : _qpSolver.solve(H, f, Bineq, zineq, zNominal);
-    _diagnostics.qpSolveTimeSeconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - solveStart).count();
-    const auto postQpStart = std::chrono::steady_clock::now();
+    const auto solveStart = timingNow();
+    VectorXd zOpt;
+    SolverResults<double> qpResults;
+    if(_fixedProgressSchedule)
+    {
+        zOpt = _qpSolver.solve(H, f, Aeq, yeq, Bineq, zineq, zNominal);
+        qpResults = _qpSolver.results();
+    }
+    else
+    {
+        const auto specialized = solve_box_aware_active_set(
+            H, f, Bineq, zineq, zNominal, _qpOptions);
+        zOpt = specialized.solution;
+        qpResults = specialized.solver;
+    }
+    _diagnostics.qpSolveTimeSeconds = timingSeconds(solveStart);
+    write_realtime_recovery_qp_capture(
+        "rmpcc", controlStepIndex, H, f, Aeq, yeq, Bineq, zineq,
+        zNominal, zOpt, qpResults);
+    _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
+    _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
+    _diagnostics.qpConverged =
+        qpResults.terminationReason == SolverTerminationReason::Converged;
+    _diagnostics.qpHitMaxIterations =
+        qpResults.terminationReason == SolverTerminationReason::MaxIterations;
+    _diagnostics.qpActiveSetChanges = static_cast<double>(qpResults.activeSetChanges);
+    _diagnostics.qpMaximumActiveSetSize =
+        static_cast<double>(qpResults.maximumActiveSetSize);
+    _diagnostics.qpUniqueActiveConstraints =
+        static_cast<double>(qpResults.uniqueActiveConstraints);
+    const auto postQpStart = timingNow();
     if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
         throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");
@@ -1513,7 +1544,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     {
         write_n125_qp_snapshot(
             H, f, Aeq, yeq, Bineq, zineq, zNominal, lower, upper, fixedProgressRates,
-            e0, nominalStates, nominalInputs, zOpt, _qpSolver.results(),
+            e0, nominalStates, nominalInputs, zOpt, qpResults,
             controlStepIndex, _pathProgress, _scheduleProgressLimit, remaining,
             scheduleRemaining, dt);
         throw std::runtime_error(
@@ -1785,10 +1816,8 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.residualLinearizationTimeSeconds = residualLinearizationTime;
     _diagnostics.pathVelocityObjectiveTimeSeconds = pathVelocityObjectiveTime;
     _diagnostics.finalHessianAssemblyTimeSeconds = finalHessianAssemblyTime;
-    _diagnostics.postQpTimeSeconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - postQpStart).count();
-    _diagnostics.totalSolveTimeSeconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - totalSolveStart).count();
+    _diagnostics.postQpTimeSeconds = timingSeconds(postQpStart);
+    _diagnostics.totalSolveTimeSeconds = timingSeconds(totalSolveStart);
 }
 
 Eigen::VectorXd
@@ -1820,7 +1849,13 @@ SerialLinkRMPCC::step(const double dt)
     baseTwist.head<3>() = currentRotation * _diagnostics.bodyTwist.head<3>();
     baseTwist.tail<3>() = currentRotation * _diagnostics.bodyTwist.tail<3>();
 
+    const auto resolvedRateStart = _rmpcc.enableTimingDiagnostics
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const Eigen::VectorXd jointCommand = resolve_endpoint_twist(baseTwist);
+    _diagnostics.resolvedRateTimeSeconds = _rmpcc.enableTimingDiagnostics
+        ? std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - resolvedRateStart).count()
+        : 0.0;
     _diagnostics.jointVelocityLimitActive = 0.0;
     for(int joint = 0; joint < jointCommand.size(); ++joint)
     {

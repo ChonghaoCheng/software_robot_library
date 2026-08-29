@@ -72,6 +72,21 @@ struct MpccDiagnostics
     double qpIterations = 0.0;
     double qpFinalStepSize = 0.0;
     double qpObjective = 0.0;
+    bool qpConverged = false;
+    bool qpHitMaxIterations = false;
+    double qpActiveSetChanges = 0.0;
+    double qpMaximumActiveSetSize = 0.0;
+    double qpUniqueActiveConstraints = 0.0;
+    double referencePreparationTimeSeconds = 0.0;
+    double errorPredictionTimeSeconds = 0.0;
+    double costWeightTimeSeconds = 0.0;
+    double pathVelocityObjectiveTimeSeconds = 0.0;
+    double hessianAssemblyTimeSeconds = 0.0;
+    double constraintConstructionTimeSeconds = 0.0;
+    double qpSolveTimeSeconds = 0.0;
+    double postQpTimeSeconds = 0.0;
+    double resolvedRateTimeSeconds = 0.0;
+    double totalStepTimeSeconds = 0.0;
     double twistRealizationError = 0.0;
     bool parentFrameMotionActive = false;
     Eigen::Vector<double,6> parentFrameBodyTwist = Eigen::Vector<double,6>::Zero();
@@ -177,6 +192,9 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         const MpccDiagnostics &
         diagnostics() const { return _diagnostics; }
 
+        /** Enable detailed steady-clock substages for timing experiments. */
+        void set_timing_diagnostics(bool enabled) { _timingDiagnosticsEnabled = enabled; }
+
     protected:
         /**
          * @brief Generate the local path tangent used by the MPCC prediction.
@@ -241,7 +259,10 @@ class SerialLinkMPCC : public SerialLinkVelocityBase
         Eigen::VectorXd _warmStart;
 
         QPSolver<double> _qpSolver;
+        SolverOptions<double> _qpOptions;
         MpccDiagnostics _diagnostics;
+        bool _timingDiagnosticsEnabled = false;
+        std::uint64_t _controlStepIndex = 0;
 
         Eigen::Vector<double,NU>
         solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
