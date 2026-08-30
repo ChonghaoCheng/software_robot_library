@@ -20,6 +20,7 @@
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -38,6 +39,10 @@ using RobotLibrary::Math::se3_inverse;
 namespace RobotLibrary { namespace Control {
 
 namespace {
+
+thread_local bool rmpccMechanismForceCapture = false;
+thread_local bool rmpccMechanismCounterfactualActive = false;
+thread_local std::string rmpccMechanismCaptureLabel;
 
 double clamp_value(const double value, const double lower, const double upper)
 {
@@ -646,6 +651,10 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         std::getenv("ROBOT_LIBRARY_RMPCC_NUMERICAL_AUDIT") != nullptr;
     const bool collectDetailedDiagnostics =
         _rmpcc.enableDetailedDiagnostics || numericalAudit;
+    const char *mechanismCaptureRoot =
+        std::getenv("ROBOT_LIBRARY_RMPCC_MECHANISM_CAPTURE_V2_DIR");
+    const bool mechanismCapture = mechanismCaptureRoot != nullptr
+        && *mechanismCaptureRoot != '\0';
     std::uint64_t stateLinearizationHash = 1469598103934665603ULL;
     std::unordered_map<std::uint64_t, Eigen::Matrix4d> referenceTransformCache;
     std::unordered_map<std::uint64_t, Eigen::Vector<double,TWIST_DIM>> referenceTangentCache;
@@ -970,6 +979,29 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         ? MatrixXd::Zero(errorDim, errorDim) : MatrixXd();
     MatrixXd fullResidualH = MatrixXd::Zero(variableDim, variableDim);
     VectorXd fullResidualF = VectorXd::Zero(variableDim);
+    // Diagnostic-only additive decomposition.  The production expressions
+    // below remain untouched; these matrices independently accumulate the
+    // exact named algebraic contributions for QP-TAIL-FAILURE-DIAGNOSTIC-02.
+    MatrixXd mechanismRunningContourH = MatrixXd::Zero(variableDim, variableDim);
+    MatrixXd mechanismRunningLagH = MatrixXd::Zero(variableDim, variableDim);
+    MatrixXd mechanismTerminalContourH = MatrixXd::Zero(variableDim, variableDim);
+    MatrixXd mechanismTerminalLagH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismRunningContourF = VectorXd::Zero(variableDim);
+    VectorXd mechanismRunningLagF = VectorXd::Zero(variableDim);
+    VectorXd mechanismTerminalContourF = VectorXd::Zero(variableDim);
+    VectorXd mechanismTerminalLagF = VectorXd::Zero(variableDim);
+    std::vector<VectorXd> mechanismStageContourF(
+        static_cast<size_t>(N), VectorXd::Zero(variableDim));
+    std::vector<VectorXd> mechanismStageLagF(
+        static_cast<size_t>(N), VectorXd::Zero(variableDim));
+    std::vector<Eigen::Vector<double,TWIST_DIM>> mechanismStageEta(
+        static_cast<size_t>(N), Eigen::Vector<double,TWIST_DIM>::Zero());
+    std::vector<Eigen::Vector<double,TWIST_DIM>> mechanismStageTau(
+        static_cast<size_t>(N), Eigen::Vector<double,TWIST_DIM>::Zero());
+    std::vector<double> mechanismStagePhaseDenominator(static_cast<size_t>(N), 0.0);
+    std::vector<double> mechanismStagePhaseAlpha(static_cast<size_t>(N), 0.0);
+    std::vector<double> mechanismStageContourNorm(static_cast<size_t>(N), 0.0);
+    std::vector<double> mechanismStageLagNorm(static_cast<size_t>(N), 0.0);
     MatrixXd contourResidualSensitivity = collectDetailedDiagnostics
         ? MatrixXd::Zero(errorDim, variableDim) : MatrixXd();
     VectorXd contourResidualOffset = collectDetailedDiagnostics
@@ -1231,10 +1263,39 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                     residualLinearization.contourJacobian * stateSensitivity;
                 contourOffset = residualLinearization.residual.contour
                     - contourJacobian * zNominal;
+                const MatrixXd mechanismContourH =
+                    2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourJacobian;
+                const VectorXd mechanismContourF =
+                    2.0 * contourJacobian.transpose()
+                    * stageContourWeight * contourOffset;
                 fullResidualH += 2.0 * contourJacobian.transpose()
                     * stageContourWeight * contourJacobian;
                 fullResidualF += 2.0 * contourJacobian.transpose()
                     * stageContourWeight * contourOffset;
+                if(mechanismCapture)
+                {
+                    MatrixXd &blockH = stage == N - 1
+                        ? mechanismTerminalContourH : mechanismRunningContourH;
+                    VectorXd &blockF = stage == N - 1
+                        ? mechanismTerminalContourF : mechanismRunningContourF;
+                    blockH += mechanismContourH;
+                    blockF += mechanismContourF;
+                    mechanismStageContourF[static_cast<size_t>(stage)] =
+                        mechanismContourF;
+                    mechanismStageEta[static_cast<size_t>(stage)] =
+                        linearization.nominalNext.head<TWIST_DIM>();
+                    mechanismStageTau[static_cast<size_t>(stage)] =
+                        stageReferenceTangent;
+                    mechanismStagePhaseDenominator[static_cast<size_t>(stage)] =
+                        residualLinearization.residual.phaseDenominator;
+                    mechanismStagePhaseAlpha[static_cast<size_t>(stage)] =
+                        residualLinearization.residual.phaseCorrection;
+                    mechanismStageContourNorm[static_cast<size_t>(stage)] =
+                        residualLinearization.residual.contour.norm();
+                    mechanismStageLagNorm[static_cast<size_t>(stage)] =
+                        residualLinearization.residual.vectorLag.norm();
+                }
                 if(_rmpcc.lagPenalty
                    == RmpccLagPenalty::PhaseInducedPoseVector)
                 {
@@ -1243,10 +1304,27 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                     const Eigen::Vector<double,TWIST_DIM> lagOffset =
                         residualLinearization.residual.vectorLag
                         - lagJacobian * zNominal;
+                    const MatrixXd mechanismLagH =
+                        2.0 * lagJacobian.transpose()
+                        * stageLagWeight * lagJacobian;
+                    const VectorXd mechanismLagF =
+                        2.0 * lagJacobian.transpose()
+                        * stageLagWeight * lagOffset;
                     fullResidualH += 2.0 * lagJacobian.transpose()
                         * stageLagWeight * lagJacobian;
                     fullResidualF += 2.0 * lagJacobian.transpose()
                         * stageLagWeight * lagOffset;
+                    if(mechanismCapture)
+                    {
+                        MatrixXd &blockH = stage == N - 1
+                            ? mechanismTerminalLagH : mechanismRunningLagH;
+                        VectorXd &blockF = stage == N - 1
+                            ? mechanismTerminalLagF : mechanismRunningLagF;
+                        blockH += mechanismLagH;
+                        blockF += mechanismLagF;
+                        mechanismStageLagF[static_cast<size_t>(stage)] =
+                            mechanismLagF;
+                    }
                     if(collectDetailedDiagnostics)
                     {
                         lagResidualSensitivity.block(
@@ -1358,6 +1436,19 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         f = fullResidualF;
     }
 
+    MatrixXd mechanismPathVelocityH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismPathVelocityF = VectorXd::Zero(variableDim);
+    MatrixXd mechanismControlH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismControlF = VectorXd::Zero(variableDim);
+    MatrixXd mechanismProgressH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismProgressF = VectorXd::Zero(variableDim);
+    MatrixXd mechanismSmoothnessH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismSmoothnessF = VectorXd::Zero(variableDim);
+    MatrixXd mechanismRegularizationH = MatrixXd::Zero(variableDim, variableDim);
+    VectorXd mechanismRegularizationF = VectorXd::Zero(variableDim);
+    std::vector<VectorXd> mechanismStagePathVelocityF(
+        static_cast<size_t>(N), VectorXd::Zero(variableDim));
+
     for(int stage = 0; stage < N; ++stage)
     {
         const int uOffset = stage * TWIST_DIM;
@@ -1372,6 +1463,11 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         {
             H.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
                 2.0 * _rmpcc.controlWeight;
+            if(mechanismCapture)
+            {
+                mechanismControlH.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                    2.0 * _rmpcc.controlWeight;
+            }
             const RmpccPathVelocityResidualLinearization residualLinearization =
                 finiteStageExact
                 ? rmpcc_linearize_finite_stage_path_velocity_residual(
@@ -1398,6 +1494,16 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 * pathVelocityWeight * residualJacobian;
             f += 2.0 * residualJacobian.transpose()
                 * pathVelocityWeight * residualOffset;
+            if(mechanismCapture)
+            {
+                const MatrixXd blockH = 2.0 * residualJacobian.transpose()
+                    * pathVelocityWeight * residualJacobian;
+                const VectorXd blockF = 2.0 * residualJacobian.transpose()
+                    * pathVelocityWeight * residualOffset;
+                mechanismPathVelocityH += blockH;
+                mechanismPathVelocityF += blockF;
+                mechanismStagePathVelocityF[static_cast<size_t>(stage)] = blockF;
+            }
             if(collectDetailedDiagnostics)
             {
                 pathVelocityResidualSensitivity.block(
@@ -1423,6 +1529,20 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             H(sOffset, sOffset) +=
                 2.0 * (transportedTangent.transpose()
                        * pathVelocityWeight * transportedTangent)(0);
+            if(mechanismCapture)
+            {
+                mechanismControlH.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                    2.0 * _rmpcc.controlWeight;
+                mechanismPathVelocityH.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                    2.0 * pathVelocityWeight;
+                mechanismPathVelocityH.block<TWIST_DIM,1>(uOffset, sOffset) +=
+                    -2.0 * pathVelocityWeight * transportedTangent;
+                mechanismPathVelocityH.block<1,TWIST_DIM>(sOffset, uOffset) +=
+                    -2.0 * transportedTangent.transpose() * pathVelocityWeight;
+                mechanismPathVelocityH(sOffset, sOffset) +=
+                    2.0 * (transportedTangent.transpose()
+                           * pathVelocityWeight * transportedTangent)(0);
+            }
         }
         pathVelocityObjectiveTime += timingSeconds(pathVelocityObjectiveStart);
 
@@ -1430,8 +1550,17 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         {
             H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateWeight;
             f(sOffset) += -2.0 * _rmpcc.progressRateWeight * _rmpcc.progressRateRef;
+            if(mechanismCapture)
+            {
+                mechanismProgressH(sOffset, sOffset) +=
+                    2.0 * _rmpcc.progressRateWeight;
+                mechanismProgressF(sOffset) +=
+                    -2.0 * _rmpcc.progressRateWeight * _rmpcc.progressRateRef;
+            }
         }
         f(sOffset) += -_rmpcc.progressReward * dt;
+        if(mechanismCapture)
+            mechanismProgressF(sOffset) += -_rmpcc.progressReward * dt;
 
         if(stage == 0)
         {
@@ -1441,6 +1570,17 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 -2.0 * _rmpcc.controlRateWeight * _lastBodyTwist;
             H(sOffset, sOffset) += 2.0 * _rmpcc.progressRateSmoothWeight;
             f(sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight * _lastProgressRate;
+            if(mechanismCapture)
+            {
+                mechanismSmoothnessH.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                    2.0 * _rmpcc.controlRateWeight;
+                mechanismSmoothnessF.segment<TWIST_DIM>(uOffset) +=
+                    -2.0 * _rmpcc.controlRateWeight * _lastBodyTwist;
+                mechanismSmoothnessH(sOffset, sOffset) +=
+                    2.0 * _rmpcc.progressRateSmoothWeight;
+                mechanismSmoothnessF(sOffset) +=
+                    -2.0 * _rmpcc.progressRateSmoothWeight * _lastProgressRate;
+            }
         }
         else
         {
@@ -1459,10 +1599,32 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
                 2.0 * _rmpcc.progressRateSmoothWeight;
             H(sOffset, previousSOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
             H(previousSOffset, sOffset) += -2.0 * _rmpcc.progressRateSmoothWeight;
+            if(mechanismCapture)
+            {
+                mechanismSmoothnessH.block<TWIST_DIM,TWIST_DIM>(uOffset, uOffset) +=
+                    2.0 * _rmpcc.controlRateWeight;
+                mechanismSmoothnessH.block<TWIST_DIM,TWIST_DIM>(previousUOffset, previousUOffset) +=
+                    2.0 * _rmpcc.controlRateWeight;
+                mechanismSmoothnessH.block<TWIST_DIM,TWIST_DIM>(uOffset, previousUOffset) +=
+                    -2.0 * _rmpcc.controlRateWeight;
+                mechanismSmoothnessH.block<TWIST_DIM,TWIST_DIM>(previousUOffset, uOffset) +=
+                    -2.0 * _rmpcc.controlRateWeight;
+                mechanismSmoothnessH(sOffset, sOffset) +=
+                    2.0 * _rmpcc.progressRateSmoothWeight;
+                mechanismSmoothnessH(previousSOffset, previousSOffset) +=
+                    2.0 * _rmpcc.progressRateSmoothWeight;
+                mechanismSmoothnessH(sOffset, previousSOffset) +=
+                    -2.0 * _rmpcc.progressRateSmoothWeight;
+                mechanismSmoothnessH(previousSOffset, sOffset) +=
+                    -2.0 * _rmpcc.progressRateSmoothWeight;
+            }
         }
     }
 
     H += _rmpcc.hessianRegularization * MatrixXd::Identity(variableDim, variableDim);
+    if(mechanismCapture)
+        mechanismRegularizationH = _rmpcc.hessianRegularization
+            * MatrixXd::Identity(variableDim, variableDim);
     H = 0.5 * (H + H.transpose());
     if(numericalAudit)
     {
@@ -1499,6 +1661,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     const auto solveStart = timingNow();
     VectorXd zOpt;
     SolverResults<double> qpResults;
+    unsigned int mechanismRepeatedActivations = 0;
     if(_fixedProgressSchedule)
     {
         zOpt = _qpSolver.solve(H, f, Aeq, yeq, Bineq, zineq, zNominal);
@@ -1510,8 +1673,206 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
             H, f, Bineq, zineq, zNominal, _qpOptions);
         zOpt = specialized.solution;
         qpResults = specialized.solver;
+        mechanismRepeatedActivations = specialized.repeatedActivations;
     }
     _diagnostics.qpSolveTimeSeconds = timingSeconds(solveStart);
+    if(mechanismCapture)
+    {
+        MatrixXd reconstructedH = mechanismRunningContourH + mechanismRunningLagH
+            + mechanismTerminalContourH + mechanismTerminalLagH
+            + mechanismPathVelocityH + mechanismControlH + mechanismProgressH
+            + mechanismSmoothnessH + mechanismRegularizationH;
+        reconstructedH = 0.5 * (reconstructedH + reconstructedH.transpose());
+        const VectorXd reconstructedF = mechanismRunningContourF
+            + mechanismRunningLagF + mechanismTerminalContourF
+            + mechanismTerminalLagF + mechanismPathVelocityF + mechanismControlF
+            + mechanismProgressF + mechanismSmoothnessF + mechanismRegularizationF;
+        const double hReconstructionError =
+            (H - reconstructedH).cwiseAbs().maxCoeff();
+        const double fReconstructionError =
+            (f - reconstructedF).cwiseAbs().maxCoeff();
+        if(hReconstructionError > 1e-10 || fReconstructionError > 1e-10)
+        {
+            throw std::runtime_error(
+                "[ERROR] [RMPCC MECHANISM CAPTURE V2] Named block decomposition "
+                "does not reconstruct the production QP.");
+        }
+
+        bool selected = rmpccMechanismForceCapture || qpResults.terminationReason
+            == SolverTerminationReason::MaxIterations;
+        const char *stepsText =
+            std::getenv("ROBOT_LIBRARY_RMPCC_MECHANISM_CAPTURE_V2_STEPS");
+        if(stepsText != nullptr)
+        {
+            std::stringstream steps(stepsText);
+            std::string token;
+            while(std::getline(steps, token, ','))
+                if(!token.empty() && std::stoull(token) == controlStepIndex)
+                    selected = true;
+        }
+        if(selected)
+        {
+            const char *labelText =
+                std::getenv("ROBOT_LIBRARY_RMPCC_MECHANISM_CAPTURE_V2_LABEL");
+            const std::string label = !rmpccMechanismCaptureLabel.empty()
+                ? rmpccMechanismCaptureLabel
+                : (labelText != nullptr && *labelText != '\0'
+                    ? labelText : "production");
+            const std::filesystem::path directory =
+                std::filesystem::path(mechanismCaptureRoot) / label
+                / ("step_" + std::to_string(controlStepIndex));
+            std::filesystem::create_directories(directory);
+            const std::vector<std::pair<std::string,const MatrixXd *>> hBlocks = {
+                {"running_contour", &mechanismRunningContourH},
+                {"running_lag", &mechanismRunningLagH},
+                {"terminal_contour", &mechanismTerminalContourH},
+                {"terminal_lag", &mechanismTerminalLagH},
+                {"path_reference_velocity", &mechanismPathVelocityH},
+                {"control", &mechanismControlH},
+                {"progress", &mechanismProgressH},
+                {"smoothness", &mechanismSmoothnessH},
+                {"regularization", &mechanismRegularizationH}};
+            const std::vector<std::pair<std::string,const VectorXd *>> fBlocks = {
+                {"running_contour", &mechanismRunningContourF},
+                {"running_lag", &mechanismRunningLagF},
+                {"terminal_contour", &mechanismTerminalContourF},
+                {"terminal_lag", &mechanismTerminalLagF},
+                {"path_reference_velocity", &mechanismPathVelocityF},
+                {"control", &mechanismControlF},
+                {"progress", &mechanismProgressF},
+                {"smoothness", &mechanismSmoothnessF},
+                {"regularization", &mechanismRegularizationF}};
+            realtime_recovery_write_matrix(directory / "H_total.csv", H);
+            realtime_recovery_write_vector(directory / "f_total.csv", f);
+            realtime_recovery_write_matrix(directory / "B.csv", Bineq);
+            realtime_recovery_write_vector(directory / "z.csv", zineq);
+            realtime_recovery_write_vector(directory / "seed.csv", zNominal);
+            realtime_recovery_write_vector(directory / "solution.csv", zOpt);
+            for(const auto &block : hBlocks)
+                realtime_recovery_write_matrix(
+                    directory / ("H_block__" + block.first + ".csv"), *block.second);
+            for(const auto &block : fBlocks)
+                realtime_recovery_write_vector(
+                    directory / ("f_block__" + block.first + ".csv"), *block.second);
+
+            MatrixXd stageF = MatrixXd::Zero(N, 3 * variableDim);
+            for(int stage = 0; stage < N; ++stage)
+            {
+                stageF.block(stage, 0, 1, variableDim) =
+                    mechanismStageContourF[static_cast<size_t>(stage)].transpose();
+                stageF.block(stage, variableDim, 1, variableDim) =
+                    mechanismStageLagF[static_cast<size_t>(stage)].transpose();
+                stageF.block(stage, 2 * variableDim, 1, variableDim) =
+                    mechanismStagePathVelocityF[static_cast<size_t>(stage)].transpose();
+            }
+            realtime_recovery_write_matrix(directory / "stage_f_blocks.csv", stageF);
+            std::ofstream stageMetadata(directory / "stage_metadata.csv");
+            stageMetadata << std::setprecision(17)
+                << "stage,predicted_progress,eta_norm,tau_translation_norm,"
+                   "tau_rotation_norm,phase_denominator,phase_alpha,"
+                   "contour_norm,lag_norm,parent_time,parent_tx,parent_ty,parent_tz,"
+                   "parent_rotation_angle\n";
+            for(int stage = 0; stage < N; ++stage)
+            {
+                const Eigen::Matrix4d parent = parentTransform(stage + 1);
+                const double parentAngle = Eigen::AngleAxisd(
+                    parent.block<3,3>(0,0)).angle();
+                stageMetadata << stage << ','
+                    << nominalStates[static_cast<size_t>(stage + 1)](6) << ','
+                    << mechanismStageEta[static_cast<size_t>(stage)].norm() << ','
+                    << mechanismStageTau[static_cast<size_t>(stage)].head<3>().norm() << ','
+                    << mechanismStageTau[static_cast<size_t>(stage)].tail<3>().norm() << ','
+                    << mechanismStagePhaseDenominator[static_cast<size_t>(stage)] << ','
+                    << mechanismStagePhaseAlpha[static_cast<size_t>(stage)] << ','
+                    << mechanismStageContourNorm[static_cast<size_t>(stage)] << ','
+                    << mechanismStageLagNorm[static_cast<size_t>(stage)] << ','
+                    << _parentFrameMotion.current_time() + (stage + 1) * dt << ','
+                    << parent(0,3) << ',' << parent(1,3) << ',' << parent(2,3) << ','
+                    << parentAngle << '\n';
+                realtime_recovery_write_matrix(
+                    directory / ("parent_stage_" + std::to_string(stage) + ".csv"),
+                    parent);
+                const Eigen::Matrix4d reference = referenceTransform(
+                    nominalStates[static_cast<size_t>(stage + 1)](6));
+                realtime_recovery_write_matrix(
+                    directory / ("reference_stage_" + std::to_string(stage) + ".csv"),
+                    reference);
+            }
+            realtime_recovery_write_matrix(
+                directory / "current_parent.csv", _parentFrameMotion.current_pose());
+            realtime_recovery_write_vector(
+                directory / "parent_body_twist.csv", _parentFrameMotion.body_twist());
+            realtime_recovery_write_vector(directory / "current_error.csv", e0);
+            std::ofstream metadata(directory / "metadata.json");
+            metadata << std::setprecision(17)
+                << "{\n  \"schema\": \"qp_tail_failure_diagnostic_02_capture_v2\",\n"
+                << "  \"label\": \"" << label << "\",\n"
+                << "  \"control_step\": " << controlStepIndex << ",\n"
+                << "  \"progress\": " << _pathProgress << ",\n"
+                << "  \"h_reconstruction_inf\": " << hReconstructionError << ",\n"
+                << "  \"f_reconstruction_inf\": " << fReconstructionError << ",\n"
+                << "  \"iterations\": " << qpResults.numberOfSteps << ",\n"
+                << "  \"active_set_changes\": " << qpResults.activeSetChanges << ",\n"
+                << "  \"repeated_activations\": " << mechanismRepeatedActivations << ",\n"
+                << "  \"termination\": \""
+                << (qpResults.terminationReason == SolverTerminationReason::Converged
+                    ? "Converged" : "MaxIterations") << "\"\n}\n";
+        }
+
+        const char *counterfactualText = std::getenv(
+            "ROBOT_LIBRARY_RMPCC_MECHANISM_CAPTURE_V2_COUNTERFACTUALS");
+        const bool counterfactualRequested = counterfactualText != nullptr
+            && *counterfactualText != '\0'
+            && (std::string(counterfactualText) == "all"
+                || qpResults.terminationReason
+                    == SolverTerminationReason::MaxIterations);
+        if(selected && !rmpccMechanismCounterfactualActive
+           && counterfactualRequested)
+        {
+            const CausalParentFrameMotion savedParent = _parentFrameMotion;
+            const Eigen::VectorXd savedWarmStart = _warmStart;
+            const RmpccDiagnostics savedDiagnostics = _diagnostics;
+            const std::uint64_t savedControlStep = _controlStepIndex;
+            const Eigen::Vector<double,TWIST_DIM> d3Twist =
+                _parentFrameMotion.body_twist();
+            const std::array<std::pair<const char *,Eigen::Vector<double,TWIST_DIM>>,4>
+                counterfactuals = {{
+                    {"Q0", Eigen::Vector<double,TWIST_DIM>::Zero()},
+                    {"Q1", (Eigen::Vector<double,TWIST_DIM>()
+                        << d3Twist.head<3>(), Eigen::Vector3d::Zero()).finished()},
+                    {"Q2", (Eigen::Vector<double,TWIST_DIM>()
+                        << Eigen::Vector3d::Zero(), d3Twist.tail<3>()).finished()},
+                    {"Q3", d3Twist}}};
+            rmpccMechanismCounterfactualActive = true;
+            for(const auto &counterfactual : counterfactuals)
+            {
+                _parentFrameMotion = savedParent;
+                _parentFrameMotion.diagnostic_override_body_twist(
+                    counterfactual.second);
+                _warmStart = savedWarmStart;
+                _diagnostics = savedDiagnostics;
+                _controlStepIndex = savedControlStep;
+                rmpccMechanismForceCapture = true;
+                rmpccMechanismCaptureLabel = counterfactual.first;
+                try
+                {
+                    solve_rmpcc(currentTransformInTrajectoryFrame, dt);
+                }
+                catch(const std::exception &)
+                {
+                    // MaxIterations is an intended counterfactual outcome;
+                    // the capture is flushed before the production contract throws.
+                }
+            }
+            rmpccMechanismForceCapture = false;
+            rmpccMechanismCaptureLabel.clear();
+            rmpccMechanismCounterfactualActive = false;
+            _parentFrameMotion = savedParent;
+            _warmStart = savedWarmStart;
+            _diagnostics = savedDiagnostics;
+            _controlStepIndex = savedControlStep;
+        }
+    }
     write_realtime_recovery_qp_capture(
         "rmpcc", controlStepIndex, _pathProgress, _lastProgressRate,
         e0, H, f, Aeq, yeq, Bineq, zineq,

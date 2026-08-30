@@ -92,6 +92,13 @@ if(BUILD_TESTING)
     add_executable(rmpcc_perf01_benchmark
         test/TrajectoryTracking/RmpccPerf01Benchmark.cpp)
     target_link_libraries(rmpcc_perf01_benchmark PRIVATE Control)
+
+    add_executable(rmpcc_mechanism_capture_v2_equivalence
+        test/TrajectoryTracking/RmpccMechanismCaptureV2Equivalence.cpp)
+    target_link_libraries(rmpcc_mechanism_capture_v2_equivalence PRIVATE Control)
+    add_test(NAME rmpcc_mechanism_capture_v2_equivalence
+        COMMAND rmpcc_mechanism_capture_v2_equivalence
+            ${CMAKE_CURRENT_BINARY_DIR}/capture_v2_equivalence_output)
 endif()
 
 # Installation instructions

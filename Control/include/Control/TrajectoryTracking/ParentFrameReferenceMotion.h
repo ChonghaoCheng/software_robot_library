@@ -95,6 +95,16 @@ class CausalParentFrameMotion
 
         double current_time() const { return _currentTime; }
 
+        /** Diagnostic-branch-only frozen-state counterfactual hook. */
+        void diagnostic_override_body_twist(
+            const Eigen::Vector<double,6> &bodyTwist)
+        {
+            if(not bodyTwist.allFinite())
+                throw std::invalid_argument("Diagnostic parent twist must be finite.");
+            _bodyTwist = bodyTwist;
+            _hasVelocity = bodyTwist.squaredNorm() > 0.0;
+        }
+
         Eigen::Matrix4d predicted_pose(const int stage, const double dt) const
         {
             if(stage < 0 or not std::isfinite(dt) or dt <= 0.0)
