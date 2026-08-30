@@ -52,6 +52,13 @@ struct TimeIndexedMpcDiagnostics
     double effectiveAngularLimit = 0.0;         ///< Per-axis angular clamp in force this invocation.
     double solveTimeSeconds = 0.0;              ///< Wall time spent inside the controller call.
     bool finite = true;                         ///< False if any recorded quantity is NaN/Inf.
+    bool parentFramePredictionActive = false;
+    Eigen::Vector<double,6> parentFrameBodyTwist =
+        Eigen::Vector<double,6>::Zero();
+    Eigen::Matrix4d measuredParentPose = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseFirst = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d predictedParentPoseHorizon = Eigen::Matrix4d::Identity();
+    double parentMeasurementTimeSeconds = 0.0;
 };
 
 /**

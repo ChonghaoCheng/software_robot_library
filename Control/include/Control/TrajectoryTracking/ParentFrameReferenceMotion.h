@@ -7,6 +7,7 @@
 #define CONTROL_TRAJECTORY_TRACKING_PARENT_FRAME_REFERENCE_MOTION_H
 
 #include <Math/MathFunctions.h>
+#include <Trajectory/CartesianTrajectoryFrame.h>
 
 #include <Eigen/Core>
 
@@ -129,6 +130,28 @@ class CausalParentFrameMotion
         bool _hasPrevious = false;
         bool _hasVelocity = false;
 };
+
+/**
+ * Predicted parent-frame state for a horizon stage.
+ *
+ * CausalParentFrameMotion stores the parent twist in parent/body axes.  The
+ * trajectory-frame contract requires the frame-origin point twist in base
+ * axes, so both linear and angular components are rotated by the predicted
+ * stage orientation before moving-frame transport is applied.
+ */
+inline RobotLibrary::Trajectory::CartesianTrajectoryFrameState
+predicted_parent_frame_state(const CausalParentFrameMotion &motion,
+                             const int stage,
+                             const double dt)
+{
+    RobotLibrary::Trajectory::CartesianTrajectoryFrameState state;
+    state.transformInBase = motion.predicted_pose(stage, dt);
+    const Eigen::Matrix3d rotation = state.transformInBase.block<3,3>(0,0);
+    state.twistInBase.head<3>() = rotation * motion.body_twist().head<3>();
+    state.twistInBase.tail<3>() = rotation * motion.body_twist().tail<3>();
+    state.measurementTimeSeconds = motion.current_time();
+    return state;
+}
 
 inline Eigen::Matrix4d
 parent_frame_reference_factor(const Eigen::Matrix4d &pathPose,

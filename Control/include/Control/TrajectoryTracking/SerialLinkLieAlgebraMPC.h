@@ -7,6 +7,7 @@
 #define SERIAL_LINK_LIE_ALGEBRA_MPC_H
 
 #include <Control/TrajectoryTracking/SerialLinkTimeIndexedMPC.h>
+#include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
 
 #include <Eigen/Core>
 #include <vector>
@@ -44,6 +45,12 @@ class SerialLinkLieAlgebraMPC : public SerialLinkTimeIndexedMPC
         set_trajectory_frame(
             const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame) override;
 
+        /** Enable causal parent prediction from a timestamped frame sample. */
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+            double timestampSeconds);
+
         void clear_trajectory() override;
         bool has_trajectory() const override { return _trajectorySet; }
 
@@ -76,6 +83,8 @@ class SerialLinkLieAlgebraMPC : public SerialLinkTimeIndexedMPC
         RobotLibrary::Trajectory::CartesianSpline _trajectory;
         RobotLibrary::Trajectory::CartesianTrajectoryFrameState _trajectoryFrame;
         bool _trajectorySet{false};
+        bool _parentPredictionEnabled{false};
+        CausalParentFrameMotion _parentFrameMotion;
 
         QPSolver<double> _qpSolver;
         Eigen::VectorXd _warmStart;

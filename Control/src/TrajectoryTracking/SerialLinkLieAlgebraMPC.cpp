@@ -72,6 +72,19 @@ SerialLinkLieAlgebraMPC::set_trajectory_frame(
 {
     RobotLibrary::Trajectory::validate_trajectory_frame(frame);
     _trajectoryFrame = frame;
+    _parentPredictionEnabled = false;
+    _parentFrameMotion.set_static_pose(frame.transformInBase);
+}
+
+void
+SerialLinkLieAlgebraMPC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+    const double timestampSeconds)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
+    _parentPredictionEnabled = true;
+    _parentFrameMotion.update(frame.transformInBase, timestampSeconds);
 }
 
 void SerialLinkLieAlgebraMPC::clear_trajectory()
@@ -94,9 +107,13 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
     const double end = _trajectory.end_time();
     const double t0 = std::clamp(std::isfinite(time) ? time : start, start, end);
 
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState currentFrame =
+        _parentPredictionEnabled
+        ? predicted_parent_frame_state(_parentFrameMotion, 0, _dt)
+        : _trajectoryFrame;
     RobotLibrary::Trajectory::CartesianState currentReference =
         RobotLibrary::Trajectory::express_state_in_base(
-            _trajectoryFrame, _trajectory.query_state(t0));
+            currentFrame, _trajectory.query_state(t0));
     RobotLibrary::Model::Pose currentPose = endpoint_pose();
     (void)pose_error(currentReference.pose);
 
@@ -110,9 +127,14 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
     for(unsigned int k = 0; k < _horizon; ++k)
     {
         const double sampleTime = std::clamp(t0 + static_cast<double>(k) * _dt, start, end);
+        const RobotLibrary::Trajectory::CartesianTrajectoryFrameState stageFrame =
+            _parentPredictionEnabled
+            ? predicted_parent_frame_state(
+                  _parentFrameMotion, static_cast<int>(k), _dt)
+            : _trajectoryFrame;
         RobotLibrary::Trajectory::CartesianState reference =
             RobotLibrary::Trajectory::express_state_in_base(
-                _trajectoryFrame, _trajectory.query_state(sampleTime));
+                stageFrame, _trajectory.query_state(sampleTime));
         referenceBodyTwists.push_back(
             endpoint_twist_in_body(reference.pose.rotation(), reference.twist));
     }
@@ -130,6 +152,18 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
     record_time_indexed_diagnostics(
         baseTwist, bodyTwist, jointCommand, t0, _dt, _maxLinearSpeed, _maxAngularSpeed,
         std::chrono::duration<double>(std::chrono::steady_clock::now() - solveStart).count());
+    _timeIndexedDiagnostics.parentFramePredictionActive =
+        _parentPredictionEnabled && _parentFrameMotion.has_velocity();
+    _timeIndexedDiagnostics.parentFrameBodyTwist =
+        _parentFrameMotion.body_twist();
+    _timeIndexedDiagnostics.measuredParentPose =
+        _parentFrameMotion.current_pose();
+    _timeIndexedDiagnostics.predictedParentPoseFirst =
+        _parentFrameMotion.predicted_pose(1, _dt);
+    _timeIndexedDiagnostics.predictedParentPoseHorizon =
+        _parentFrameMotion.predicted_pose(static_cast<int>(_horizon), _dt);
+    _timeIndexedDiagnostics.parentMeasurementTimeSeconds =
+        _parentFrameMotion.current_time();
     return jointCommand;
 }
 
