@@ -22,6 +22,7 @@
 #include <Math/QPSolver.h>
 
 #include <Eigen/Core>                                                                               // Eigen::Matrix
+#include <optional>
 
 namespace RobotLibrary { namespace Control {
 /**
@@ -56,6 +57,19 @@ struct SerialLinkParameters
     std::vector<double> jointVelocityGains;
                                                                           
     SolverOptions<double> qpsolver = SolverOptions<double>();                                       ///< Parameters for the underlying QP solver
+
+    /**
+     * Optional iteration budget for the optimized-progress task-space QP.
+     * When unset, the historical shared QP budget remains the compatibility
+     * default.  Lower-level resolved-rate and fixed-progress QPs continue to
+     * use qpsolver.maxSteps directly.
+     */
+    std::optional<unsigned int> taskQpMaxSteps;
+
+    unsigned int optimized_progress_qp_max_steps() const
+    {
+        return taskQpMaxSteps.value_or(qpsolver.maxSteps);
+    }
 };
 
 /**

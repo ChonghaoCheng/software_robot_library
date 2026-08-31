@@ -153,6 +153,7 @@ struct RmpccDiagnostics
     double qpFirstTwistGradientNorm = 0.0;///< ||(H z + f)_u0||; zero for an interior optimum
     double qpStepNorm           = 0.0;  ///< ||z_opt - z_warm||
     double qpSolveTimeSeconds   = 0.0;  ///< Wall time spent in the task-space QP solve
+    double qpObjective          = 0.0;  ///< Objective reported directly by the task-space QP result
     double qpIterations         = 0.0;
     double qpFinalStepSize      = 0.0;
     bool qpConverged            = false;
@@ -160,6 +161,12 @@ struct RmpccDiagnostics
     double qpActiveSetChanges   = 0.0;
     double qpMaximumActiveSetSize = 0.0;
     double qpUniqueActiveConstraints = 0.0;
+
+    template<typename SolverResult>
+    void record_qp_objective(const SolverResult &result)
+    {
+        qpObjective = result.objectiveFunction;
+    }
     double referencePoseQueryTimeSeconds = 0.0;
     double referenceTangentQueryTimeSeconds = 0.0;
     std::uint64_t referencePoseQueryCount = 0;

@@ -36,6 +36,7 @@ SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTre
   _qpSolver(parameters.qpsolver),
   _qpOptions(parameters.qpsolver)
 {
+    _qpOptions.maxSteps = parameters.optimized_progress_qp_max_steps();
     // The action-loop frequency is shared by all velocity controllers. The
     // prediction step follows it by default, but an explicit dt may still be
     // supplied for library-only use without silently changing the loop rate.

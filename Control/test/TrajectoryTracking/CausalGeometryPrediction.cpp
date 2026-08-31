@@ -196,6 +196,11 @@ void static_parent_controller_equivalence(const std::filesystem::path &urdf)
     auto mpccPredModel = model_at_state(urdf);
     SerialLinkMPCC mpccStatic(mpccStaticModel, "tool", base);
     SerialLinkMPCC mpccPred(mpccPredModel, "tool", base);
+    // This test qualifies parent-frame equivalence, not the optimized-progress
+    // active-set path.  Use the deterministic fixed-progress path so a
+    // degenerate zero-error task QP cannot mask the parent semantic check.
+    mpccStatic.set_fixed_progress_schedule(true);
+    mpccPred.set_fixed_progress_schedule(true);
     const auto mpccPath = make_path(mpccStatic.endpoint_pose());
     mpccStatic.set_trajectory(mpccPath);
     mpccPred.set_trajectory(mpccPath);
@@ -226,6 +231,8 @@ void static_parent_controller_equivalence(const std::filesystem::path &urdf)
     auto noPredModel = model_at_state(urdf);
     SerialLinkRMPCC gp(gpModel, "tool", base, rp);
     SerialLinkRMPCC noPred(noPredModel, "tool", base, rp);
+    gp.set_fixed_progress_schedule(true);
+    noPred.set_fixed_progress_schedule(true);
     const auto rmpccPath = make_path(gp.endpoint_pose());
     gp.set_trajectory(rmpccPath);
     noPred.set_trajectory(rmpccPath);

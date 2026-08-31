@@ -244,6 +244,7 @@ SerialLinkRMPCC::SerialLinkRMPCC(std::shared_ptr<RobotLibrary::Model::KinematicT
   _qpOptions(parameters.qpsolver),
   _poseArcTable(std::make_shared<RmpccPoseArcTable>())
 {
+    _qpOptions.maxSteps = parameters.optimized_progress_qp_max_steps();
     if(_rmpcc.horizonSteps < 1)
     {
         _rmpcc.horizonSteps = 1;
@@ -1531,6 +1532,7 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
         e0, H, f, Aeq, yeq, Bineq, zineq,
         zNominal, zOpt, qpResults);
     _diagnostics.qpIterations = static_cast<double>(qpResults.numberOfSteps);
+    _diagnostics.record_qp_objective(qpResults);
     _diagnostics.qpFinalStepSize = qpResults.finalStepSize;
     _diagnostics.qpConverged =
         qpResults.terminationReason == SolverTerminationReason::Converged;
