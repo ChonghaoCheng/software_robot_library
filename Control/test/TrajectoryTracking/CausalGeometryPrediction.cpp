@@ -1,5 +1,6 @@
 #include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
 #include <Control/TrajectoryTracking/SerialLinkLieAlgebraMPC.h>
+#include <Control/TrajectoryTracking/SerialLinkMPCC.h>
 #include <Control/TrajectoryTracking/SerialLinkRMPCC.h>
 #include <Math/MathFunctions.h>
 #include <Model/KinematicTree.h>
@@ -153,14 +154,15 @@ void prediction_kinematics()
     steady.update(steady.current_pose(), steady.current_time() - sampleDt);
     check(steady.out_of_order_timestamp_count() == outOfOrderBefore + 1,
           "out-of-order timestamp observability");
-    check(!steady.too_small_interval_observable_without_policy_change(),
-          "too-small interval must remain explicitly not observable without policy change");
+    check(steady.too_small_interval_observable_without_policy_change(),
+          "too-small interval is explicitly observable under the temporal policy");
 }
 
 void static_parent_controller_equivalence(const std::filesystem::path &urdf)
 {
     using RobotLibrary::Control::RmpccParameters;
     using RobotLibrary::Control::SerialLinkLieAlgebraMPC;
+    using RobotLibrary::Control::SerialLinkMPCC;
     using RobotLibrary::Control::SerialLinkParameters;
     using RobotLibrary::Control::SerialLinkRMPCC;
     using RobotLibrary::Trajectory::CartesianTrajectoryFrameState;
@@ -189,6 +191,23 @@ void static_parent_controller_equivalence(const std::filesystem::path &urdf)
           "Lie static parent first command equivalence");
     check(liePred.diagnostics().parentFrameBodyTwist.norm() < 1e-12,
           "Lie static parent predicted twist is zero");
+
+    auto mpccStaticModel = model_at_state(urdf);
+    auto mpccPredModel = model_at_state(urdf);
+    SerialLinkMPCC mpccStatic(mpccStaticModel, "tool", base);
+    SerialLinkMPCC mpccPred(mpccPredModel, "tool", base);
+    const auto mpccPath = make_path(mpccStatic.endpoint_pose());
+    mpccStatic.set_trajectory(mpccPath);
+    mpccPred.set_trajectory(mpccPath);
+    mpccStatic.set_trajectory_frame(frame);
+    mpccPred.set_trajectory_frame(frame, 0.0);
+    mpccPred.set_trajectory_frame(frame, 0.01);
+    const Eigen::VectorXd mpccStaticCommand = mpccStatic.step(0.002);
+    const Eigen::VectorXd mpccPredCommand = mpccPred.step(0.002);
+    check((mpccStaticCommand - mpccPredCommand).norm() < 1e-9,
+          "MPCC static parent first command equivalence");
+    check(mpccPred.diagnostics().parentFrameBodyTwist.norm() < 1e-12,
+          "MPCC static parent predicted twist is zero");
 
     RmpccParameters rp;
     rp.horizonSteps = 20;

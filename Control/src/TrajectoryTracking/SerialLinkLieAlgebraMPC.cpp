@@ -87,6 +87,20 @@ SerialLinkLieAlgebraMPC::set_trajectory_frame(
     _parentFrameMotion.update(frame.transformInBase, timestampSeconds);
 }
 
+void
+SerialLinkLieAlgebraMPC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+    const double timestampSeconds,
+    const std::uint64_t generation,
+    const double evaluationTimeSeconds)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
+    _parentPredictionEnabled = true;
+    _parentFrameMotion.update(
+        frame.transformInBase, timestampSeconds, generation, evaluationTimeSeconds);
+}
+
 void SerialLinkLieAlgebraMPC::clear_trajectory()
 {
     _trajectorySet = false;
@@ -153,7 +167,7 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
         baseTwist, bodyTwist, jointCommand, t0, _dt, _maxLinearSpeed, _maxAngularSpeed,
         std::chrono::duration<double>(std::chrono::steady_clock::now() - solveStart).count());
     _timeIndexedDiagnostics.parentFramePredictionActive =
-        _parentPredictionEnabled && _parentFrameMotion.has_velocity();
+        _parentPredictionEnabled && _parentFrameMotion.prediction_velocity_active();
     _timeIndexedDiagnostics.parentFrameBodyTwist =
         _parentFrameMotion.body_twist();
     _timeIndexedDiagnostics.measuredParentPose =
@@ -166,6 +180,12 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
         _parentFrameMotion.current_time();
     _timeIndexedDiagnostics.parentPreviousMeasurementTimeSeconds =
         _parentFrameMotion.previous_time();
+    _timeIndexedDiagnostics.parentEvaluationTimeSeconds =
+        _parentFrameMotion.evaluation_time();
+    _timeIndexedDiagnostics.parentMeasurementAgeSeconds =
+        _parentFrameMotion.measurement_age();
+    _timeIndexedDiagnostics.parentMeasurementGeneration =
+        static_cast<double>(_parentFrameMotion.current_generation());
     _timeIndexedDiagnostics.parentElapsedSeconds = _parentFrameMotion.last_elapsed();
     _timeIndexedDiagnostics.parentUpdateStatus =
         static_cast<double>(_parentFrameMotion.last_update_status());
@@ -175,14 +195,24 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
         _parentFrameMotion.static_setter_count();
     _timeIndexedDiagnostics.parentDuplicateTimestampCount =
         _parentFrameMotion.duplicate_timestamp_count();
+    _timeIndexedDiagnostics.parentDuplicatePoseMismatchCount =
+        _parentFrameMotion.duplicate_pose_mismatch_count();
     _timeIndexedDiagnostics.parentOutOfOrderTimestampCount =
         _parentFrameMotion.out_of_order_timestamp_count();
+    _timeIndexedDiagnostics.parentTooSmallIntervalCount =
+        _parentFrameMotion.too_small_interval_count();
+    _timeIndexedDiagnostics.parentGenerationResetCount =
+        _parentFrameMotion.generation_reset_count();
     _timeIndexedDiagnostics.parentMinimumPositiveElapsed =
         _parentFrameMotion.minimum_positive_elapsed();
     _timeIndexedDiagnostics.parentMaximumPositiveElapsed =
         _parentFrameMotion.maximum_positive_elapsed();
     _timeIndexedDiagnostics.parentTooSmallIntervalObservable =
         _parentFrameMotion.too_small_interval_observable_without_policy_change();
+    _timeIndexedDiagnostics.parentRawVelocityValid =
+        _parentFrameMotion.raw_velocity_valid();
+    _timeIndexedDiagnostics.parentPredictionVelocityFresh =
+        _parentFrameMotion.prediction_velocity_active();
     return jointCommand;
 }
 

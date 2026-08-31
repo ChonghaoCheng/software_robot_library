@@ -154,6 +154,19 @@ SerialLinkMPCC::set_trajectory_frame(
     _parentFrameMotion.update(frame.transformInBase, timestampSeconds);
 }
 
+void
+SerialLinkMPCC::set_trajectory_frame(
+    const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+    const double timestampSeconds,
+    const std::uint64_t generation,
+    const double evaluationTimeSeconds)
+{
+    RobotLibrary::Trajectory::validate_trajectory_frame(frame);
+    _trajectoryFrame = frame;
+    _parentFrameMotion.update(
+        frame.transformInBase, timestampSeconds, generation, evaluationTimeSeconds);
+}
+
 Eigen::VectorXd
 SerialLinkMPCC::step(const double dt)
 {
@@ -260,7 +273,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         static_cast<size_t>(N), Eigen::Vector<double,ERROR_DIM>::Zero());
     std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotions(
         static_cast<size_t>(N));
-    const bool parentMotionActive = _parentFrameMotion.has_velocity()
+    const bool parentMotionActive = _parentFrameMotion.prediction_velocity_active()
         && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
     const auto parentTransform = [&](const int stage)
     {
@@ -659,16 +672,27 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
     _diagnostics.parentMeasurementTimeSeconds = _parentFrameMotion.current_time();
     _diagnostics.parentPreviousMeasurementTimeSeconds = _parentFrameMotion.previous_time();
+    _diagnostics.parentEvaluationTimeSeconds = _parentFrameMotion.evaluation_time();
+    _diagnostics.parentMeasurementAgeSeconds = _parentFrameMotion.measurement_age();
+    _diagnostics.parentMeasurementGeneration =
+        static_cast<double>(_parentFrameMotion.current_generation());
     _diagnostics.parentElapsedSeconds = _parentFrameMotion.last_elapsed();
     _diagnostics.parentUpdateStatus = static_cast<double>(_parentFrameMotion.last_update_status());
     _diagnostics.parentTimestampedSetterCount = _parentFrameMotion.timestamped_setter_count();
     _diagnostics.parentStaticSetterCount = _parentFrameMotion.static_setter_count();
     _diagnostics.parentDuplicateTimestampCount = _parentFrameMotion.duplicate_timestamp_count();
+    _diagnostics.parentDuplicatePoseMismatchCount =
+        _parentFrameMotion.duplicate_pose_mismatch_count();
     _diagnostics.parentOutOfOrderTimestampCount = _parentFrameMotion.out_of_order_timestamp_count();
+    _diagnostics.parentTooSmallIntervalCount = _parentFrameMotion.too_small_interval_count();
+    _diagnostics.parentGenerationResetCount = _parentFrameMotion.generation_reset_count();
     _diagnostics.parentMinimumPositiveElapsed = _parentFrameMotion.minimum_positive_elapsed();
     _diagnostics.parentMaximumPositiveElapsed = _parentFrameMotion.maximum_positive_elapsed();
     _diagnostics.parentTooSmallIntervalObservable =
         _parentFrameMotion.too_small_interval_observable_without_policy_change();
+    _diagnostics.parentRawVelocityValid = _parentFrameMotion.raw_velocity_valid();
+    _diagnostics.parentPredictionVelocityFresh =
+        _parentFrameMotion.prediction_velocity_active();
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
     const Eigen::Matrix4d firstPathPose =

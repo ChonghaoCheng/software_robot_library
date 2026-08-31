@@ -32,9 +32,18 @@ class CausalParentFrameMotion
             StaticPose = 1,
             FirstTimestampedSample = 2,
             TimestampAdvanced = 3,
-            DuplicateTimestampIgnored = 4,
-            OutOfOrderTimestampIgnored = 5
+            NoNewMeasurement = 4,
+            DuplicateTimestampPoseMismatchRejected = 5,
+            OutOfOrderTimestampRejected = 6,
+            TooSmallIntervalReseeded = 7,
+            GenerationResetFirstSample = 8,
+            NonfiniteInputRejected = 9
         };
+
+        static constexpr double minimumElapsedSeconds = 1e-6;
+        static constexpr double maximumMeasurementAgeSeconds = 0.050;
+        static constexpr double duplicateTranslationTolerance = 1e-10;
+        static constexpr double duplicateRotationTolerance = 1e-10;
 
         void reset()
         {
@@ -45,12 +54,20 @@ class CausalParentFrameMotion
             _previousTime = 0.0;
             _hasCurrent = false;
             _hasPrevious = false;
-            _hasVelocity = false;
+            _hasTimestampedCurrent = false;
+            _rawVelocityValid = false;
+            _hasGeneration = false;
+            _generation = 0;
+            _evaluationTime = 0.0;
+            _measurementAge = 0.0;
             _lastStatus = UpdateStatus::NeverUpdated;
             _timestampedSetterCount = 0;
             _staticSetterCount = 0;
             _duplicateTimestampCount = 0;
+            _duplicatePoseMismatchCount = 0;
             _outOfOrderTimestampCount = 0;
+            _tooSmallIntervalCount = 0;
+            _generationResetCount = 0;
             _lastElapsed = 0.0;
             _minimumPositiveElapsed = std::numeric_limits<double>::infinity();
             _maximumPositiveElapsed = 0.0;
@@ -66,75 +83,63 @@ class CausalParentFrameMotion
             _previousTime = 0.0;
             _hasCurrent = true;
             _hasPrevious = false;
-            _hasVelocity = false;
+            _hasTimestampedCurrent = false;
+            _rawVelocityValid = false;
+            _hasGeneration = false;
+            _measurementAge = 0.0;
             ++_staticSetterCount;
             _lastStatus = UpdateStatus::StaticPose;
         }
 
-        void update(const Eigen::Matrix4d &pose, const double timestampSeconds)
+        UpdateStatus update(const Eigen::Matrix4d &pose,
+                            const double timestampSeconds)
         {
-            ++_timestampedSetterCount;
-            require_finite_pose(pose);
-            if(not std::isfinite(timestampSeconds))
-            {
-                throw std::invalid_argument(
-                    "[ERROR] [PARENT FRAME MOTION] Timestamp must be finite.");
-            }
-
-            if(_hasCurrent and timestampSeconds > _currentTime)
-            {
-                _previous = _current;
-                _previousTime = _currentTime;
-                _hasPrevious = true;
-                _current = pose;
-                _currentTime = timestampSeconds;
-                const double elapsed = _currentTime - _previousTime;
-                _lastElapsed = elapsed;
-                _minimumPositiveElapsed = std::min(_minimumPositiveElapsed, elapsed);
-                _maximumPositiveElapsed = std::max(_maximumPositiveElapsed, elapsed);
-                _bodyTwist = RobotLibrary::Math::se3_logarithm(
-                    RobotLibrary::Math::se3_inverse(_previous) * _current) / elapsed;
-                _hasVelocity = true;
-                _lastStatus = UpdateStatus::TimestampAdvanced;
-                return;
-            }
-
-            // A repeated/out-of-order measurement is not a new sample. Keep
-            // the latest two-sample estimate rather than creating a zero/spike
-            // sequence when TF is published below the controller frequency.
-            if(_hasCurrent)
-            {
-                if(timestampSeconds == _currentTime)
-                {
-                    ++_duplicateTimestampCount;
-                    _lastStatus = UpdateStatus::DuplicateTimestampIgnored;
-                }
-                else
-                {
-                    ++_outOfOrderTimestampCount;
-                    _lastStatus = UpdateStatus::OutOfOrderTimestampIgnored;
-                }
-                return;
-            }
-
-            // The first sample establishes A_k but cannot define velocity.
-            _current = pose;
-            _currentTime = timestampSeconds;
-            _bodyTwist.setZero();
-            _hasVelocity = false;
-            _hasCurrent = true;
-            _hasPrevious = false;
-            _lastStatus = UpdateStatus::FirstTimestampedSample;
+            return update_impl(pose, timestampSeconds, 0, timestampSeconds, false);
         }
 
-        bool has_velocity() const { return _hasVelocity; }
+        UpdateStatus update(const Eigen::Matrix4d &pose,
+                            const double timestampSeconds,
+                            const std::uint64_t generation,
+                            const double evaluationTimeSeconds)
+        {
+            return update_impl(
+                pose, timestampSeconds, generation, evaluationTimeSeconds, true);
+        }
+
+        void evaluate_at(const double evaluationTimeSeconds)
+        {
+            if(not std::isfinite(evaluationTimeSeconds))
+            {
+                _lastStatus = UpdateStatus::NonfiniteInputRejected;
+                throw std::invalid_argument(
+                    "[ERROR] [PARENT FRAME MOTION] Evaluation time must be finite.");
+            }
+            _evaluationTime = evaluationTimeSeconds;
+            update_measurement_age();
+        }
+
+        bool has_velocity() const { return _rawVelocityValid; }
+        bool raw_velocity_valid() const { return _rawVelocityValid; }
+        bool prediction_velocity_active() const
+        {
+            return _rawVelocityValid
+                && _measurementAge <= maximumMeasurementAgeSeconds;
+        }
 
         const Eigen::Vector<double,6> &body_twist() const { return _bodyTwist; }
+
+        Eigen::Vector<double,6> prediction_body_twist() const
+        {
+            return prediction_velocity_active()
+                ? _bodyTwist : Eigen::Vector<double,6>::Zero();
+        }
 
         const Eigen::Matrix4d &current_pose() const { return _current; }
 
         double current_time() const { return _currentTime; }
         double previous_time() const { return _previousTime; }
+        double evaluation_time() const { return _evaluationTime; }
+        double measurement_age() const { return _measurementAge; }
         double last_elapsed() const { return _lastElapsed; }
         double minimum_positive_elapsed() const
         {
@@ -142,11 +147,19 @@ class CausalParentFrameMotion
         }
         double maximum_positive_elapsed() const { return _maximumPositiveElapsed; }
         UpdateStatus last_update_status() const { return _lastStatus; }
+        std::uint64_t current_generation() const { return _generation; }
+        bool has_generation() const { return _hasGeneration; }
         std::uint64_t timestamped_setter_count() const { return _timestampedSetterCount; }
         std::uint64_t static_setter_count() const { return _staticSetterCount; }
         std::uint64_t duplicate_timestamp_count() const { return _duplicateTimestampCount; }
+        std::uint64_t duplicate_pose_mismatch_count() const
+        {
+            return _duplicatePoseMismatchCount;
+        }
         std::uint64_t out_of_order_timestamp_count() const { return _outOfOrderTimestampCount; }
-        bool too_small_interval_observable_without_policy_change() const { return false; }
+        std::uint64_t too_small_interval_count() const { return _tooSmallIntervalCount; }
+        std::uint64_t generation_reset_count() const { return _generationResetCount; }
+        bool too_small_interval_observable_without_policy_change() const { return true; }
 
         Eigen::Matrix4d predicted_pose(const int stage, const double dt) const
         {
@@ -160,10 +173,132 @@ class CausalParentFrameMotion
                 return Eigen::Matrix4d::Identity();
             }
             return _current * RobotLibrary::Math::se3_exponential(
-                static_cast<double>(stage) * dt * _bodyTwist);
+                static_cast<double>(stage) * dt * prediction_body_twist());
         }
 
     private:
+        UpdateStatus update_impl(const Eigen::Matrix4d &pose,
+                                 const double timestampSeconds,
+                                 const std::uint64_t generation,
+                                 const double evaluationTimeSeconds,
+                                 const bool generationProvided)
+        {
+            ++_timestampedSetterCount;
+            if(not pose.allFinite() || not std::isfinite(timestampSeconds)
+               || not std::isfinite(evaluationTimeSeconds))
+            {
+                _lastStatus = UpdateStatus::NonfiniteInputRejected;
+                throw std::invalid_argument(
+                    "[ERROR] [PARENT FRAME MOTION] Pose and timestamps must be finite.");
+            }
+            _evaluationTime = evaluationTimeSeconds;
+
+            if(generationProvided && _hasGeneration && generation != _generation)
+            {
+                ++_generationResetCount;
+                _generation = generation;
+                seed_timestamped_sample(pose, timestampSeconds);
+                _lastStatus = UpdateStatus::GenerationResetFirstSample;
+                update_measurement_age();
+                return _lastStatus;
+            }
+            if(generationProvided && !_hasGeneration)
+            {
+                _generation = generation;
+                _hasGeneration = true;
+            }
+
+            if(!_hasTimestampedCurrent)
+            {
+                seed_timestamped_sample(pose, timestampSeconds);
+                _lastStatus = UpdateStatus::FirstTimestampedSample;
+                update_measurement_age();
+                return _lastStatus;
+            }
+
+            if(timestampSeconds == _currentTime)
+            {
+                if(same_pose_within_duplicate_tolerance(pose, _current))
+                {
+                    ++_duplicateTimestampCount;
+                    _lastStatus = UpdateStatus::NoNewMeasurement;
+                }
+                else
+                {
+                    ++_duplicatePoseMismatchCount;
+                    _lastStatus = UpdateStatus::DuplicateTimestampPoseMismatchRejected;
+                }
+                update_measurement_age();
+                return _lastStatus;
+            }
+
+            if(timestampSeconds < _currentTime)
+            {
+                ++_outOfOrderTimestampCount;
+                _lastStatus = UpdateStatus::OutOfOrderTimestampRejected;
+                update_measurement_age();
+                return _lastStatus;
+            }
+
+            const double elapsed = timestampSeconds - _currentTime;
+            if(elapsed < minimumElapsedSeconds)
+            {
+                ++_tooSmallIntervalCount;
+                seed_timestamped_sample(pose, timestampSeconds);
+                _lastStatus = UpdateStatus::TooSmallIntervalReseeded;
+                update_measurement_age();
+                return _lastStatus;
+            }
+
+            _previous = _current;
+            _previousTime = _currentTime;
+            _hasPrevious = true;
+            _current = pose;
+            _currentTime = timestampSeconds;
+            _lastElapsed = elapsed;
+            _minimumPositiveElapsed = std::min(_minimumPositiveElapsed, elapsed);
+            _maximumPositiveElapsed = std::max(_maximumPositiveElapsed, elapsed);
+            _bodyTwist = RobotLibrary::Math::se3_logarithm(
+                RobotLibrary::Math::se3_inverse(_previous) * _current) / elapsed;
+            _rawVelocityValid = true;
+            _lastStatus = UpdateStatus::TimestampAdvanced;
+            update_measurement_age();
+            return _lastStatus;
+        }
+
+        void seed_timestamped_sample(const Eigen::Matrix4d &pose,
+                                     const double timestampSeconds)
+        {
+            _current = pose;
+            _previous = pose;
+            _currentTime = timestampSeconds;
+            _previousTime = timestampSeconds;
+            _bodyTwist.setZero();
+            _hasCurrent = true;
+            _hasPrevious = false;
+            _hasTimestampedCurrent = true;
+            _rawVelocityValid = false;
+            _lastElapsed = 0.0;
+        }
+
+        void update_measurement_age()
+        {
+            _measurementAge = _hasTimestampedCurrent
+                ? std::max(0.0, _evaluationTime - _currentTime) : 0.0;
+        }
+
+        static bool same_pose_within_duplicate_tolerance(
+            const Eigen::Matrix4d &a, const Eigen::Matrix4d &b)
+        {
+            const double translation =
+                (a.block<3,1>(0,3) - b.block<3,1>(0,3)).norm();
+            const Eigen::Matrix3d relative =
+                b.block<3,3>(0,0).transpose() * a.block<3,3>(0,0);
+            const double cosine = std::clamp((relative.trace() - 1.0) * 0.5, -1.0, 1.0);
+            return translation <= duplicateTranslationTolerance
+                && std::acos(cosine) <= duplicateRotationTolerance;
+        }
+
         static void require_finite_pose(const Eigen::Matrix4d &pose)
         {
             if(not pose.allFinite())
@@ -180,12 +315,20 @@ class CausalParentFrameMotion
         double _previousTime = 0.0;
         bool _hasCurrent = false;
         bool _hasPrevious = false;
-        bool _hasVelocity = false;
+        bool _hasTimestampedCurrent = false;
+        bool _rawVelocityValid = false;
+        bool _hasGeneration = false;
+        std::uint64_t _generation = 0;
+        double _evaluationTime = 0.0;
+        double _measurementAge = 0.0;
         UpdateStatus _lastStatus = UpdateStatus::NeverUpdated;
         std::uint64_t _timestampedSetterCount = 0;
         std::uint64_t _staticSetterCount = 0;
         std::uint64_t _duplicateTimestampCount = 0;
+        std::uint64_t _duplicatePoseMismatchCount = 0;
         std::uint64_t _outOfOrderTimestampCount = 0;
+        std::uint64_t _tooSmallIntervalCount = 0;
+        std::uint64_t _generationResetCount = 0;
         double _lastElapsed = 0.0;
         double _minimumPositiveElapsed = std::numeric_limits<double>::infinity();
         double _maximumPositiveElapsed = 0.0;
@@ -207,8 +350,9 @@ predicted_parent_frame_state(const CausalParentFrameMotion &motion,
     RobotLibrary::Trajectory::CartesianTrajectoryFrameState state;
     state.transformInBase = motion.predicted_pose(stage, dt);
     const Eigen::Matrix3d rotation = state.transformInBase.block<3,3>(0,0);
-    state.twistInBase.head<3>() = rotation * motion.body_twist().head<3>();
-    state.twistInBase.tail<3>() = rotation * motion.body_twist().tail<3>();
+    const Eigen::Vector<double,6> predictionTwist = motion.prediction_body_twist();
+    state.twistInBase.head<3>() = rotation * predictionTwist.head<3>();
+    state.twistInBase.tail<3>() = rotation * predictionTwist.tail<3>();
     state.measurementTimeSeconds = motion.current_time();
     return state;
 }

@@ -10,6 +10,7 @@
 #include <Control/TrajectoryTracking/ParentFrameReferenceMotion.h>
 
 #include <Eigen/Core>
+#include <cstdint>
 #include <vector>
 
 namespace RobotLibrary { namespace Control {
@@ -50,6 +51,13 @@ class SerialLinkLieAlgebraMPC : public SerialLinkTimeIndexedMPC
         set_trajectory_frame(
             const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
             double timestampSeconds);
+
+        void
+        set_trajectory_frame(
+            const RobotLibrary::Trajectory::CartesianTrajectoryFrameState &frame,
+            double timestampSeconds,
+            std::uint64_t generation,
+            double evaluationTimeSeconds);
 
         void clear_trajectory() override;
         bool has_trajectory() const override { return _trajectorySet; }
