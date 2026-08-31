@@ -97,6 +97,16 @@ struct MpccDiagnostics
     Eigen::Matrix4d parentReferenceFactorFirst = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d repairedReferenceDisplacementFirst = Eigen::Matrix4d::Identity();
     double parentMeasurementTimeSeconds = 0.0;
+    double parentPreviousMeasurementTimeSeconds = 0.0;
+    double parentElapsedSeconds = 0.0;
+    double parentUpdateStatus = 0.0;
+    double parentTimestampedSetterCount = 0.0;
+    double parentStaticSetterCount = 0.0;
+    double parentDuplicateTimestampCount = 0.0;
+    double parentOutOfOrderTimestampCount = 0.0;
+    double parentMinimumPositiveElapsed = 0.0;
+    double parentMaximumPositiveElapsed = 0.0;
+    bool parentTooSmallIntervalObservable = false;
 };
 
 class SerialLinkMPCC : public SerialLinkVelocityBase

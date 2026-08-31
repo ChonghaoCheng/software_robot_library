@@ -164,6 +164,25 @@ SerialLinkLieAlgebraMPC::track_endpoint_trajectory_at_time(const double &time)
         _parentFrameMotion.predicted_pose(static_cast<int>(_horizon), _dt);
     _timeIndexedDiagnostics.parentMeasurementTimeSeconds =
         _parentFrameMotion.current_time();
+    _timeIndexedDiagnostics.parentPreviousMeasurementTimeSeconds =
+        _parentFrameMotion.previous_time();
+    _timeIndexedDiagnostics.parentElapsedSeconds = _parentFrameMotion.last_elapsed();
+    _timeIndexedDiagnostics.parentUpdateStatus =
+        static_cast<double>(_parentFrameMotion.last_update_status());
+    _timeIndexedDiagnostics.parentTimestampedSetterCount =
+        _parentFrameMotion.timestamped_setter_count();
+    _timeIndexedDiagnostics.parentStaticSetterCount =
+        _parentFrameMotion.static_setter_count();
+    _timeIndexedDiagnostics.parentDuplicateTimestampCount =
+        _parentFrameMotion.duplicate_timestamp_count();
+    _timeIndexedDiagnostics.parentOutOfOrderTimestampCount =
+        _parentFrameMotion.out_of_order_timestamp_count();
+    _timeIndexedDiagnostics.parentMinimumPositiveElapsed =
+        _parentFrameMotion.minimum_positive_elapsed();
+    _timeIndexedDiagnostics.parentMaximumPositiveElapsed =
+        _parentFrameMotion.maximum_positive_elapsed();
+    _timeIndexedDiagnostics.parentTooSmallIntervalObservable =
+        _parentFrameMotion.too_small_interval_observable_without_policy_change();
     return jointCommand;
 }
 

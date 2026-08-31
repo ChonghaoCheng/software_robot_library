@@ -11,7 +11,10 @@
 
 #include <Eigen/Core>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 namespace RobotLibrary { namespace Control {
@@ -23,6 +26,16 @@ namespace RobotLibrary { namespace Control {
 class CausalParentFrameMotion
 {
     public:
+        enum class UpdateStatus
+        {
+            NeverUpdated = 0,
+            StaticPose = 1,
+            FirstTimestampedSample = 2,
+            TimestampAdvanced = 3,
+            DuplicateTimestampIgnored = 4,
+            OutOfOrderTimestampIgnored = 5
+        };
+
         void reset()
         {
             _current = Eigen::Matrix4d::Identity();
@@ -33,6 +46,14 @@ class CausalParentFrameMotion
             _hasCurrent = false;
             _hasPrevious = false;
             _hasVelocity = false;
+            _lastStatus = UpdateStatus::NeverUpdated;
+            _timestampedSetterCount = 0;
+            _staticSetterCount = 0;
+            _duplicateTimestampCount = 0;
+            _outOfOrderTimestampCount = 0;
+            _lastElapsed = 0.0;
+            _minimumPositiveElapsed = std::numeric_limits<double>::infinity();
+            _maximumPositiveElapsed = 0.0;
         }
 
         void set_static_pose(const Eigen::Matrix4d &pose)
@@ -46,10 +67,13 @@ class CausalParentFrameMotion
             _hasCurrent = true;
             _hasPrevious = false;
             _hasVelocity = false;
+            ++_staticSetterCount;
+            _lastStatus = UpdateStatus::StaticPose;
         }
 
         void update(const Eigen::Matrix4d &pose, const double timestampSeconds)
         {
+            ++_timestampedSetterCount;
             require_finite_pose(pose);
             if(not std::isfinite(timestampSeconds))
             {
@@ -65,9 +89,13 @@ class CausalParentFrameMotion
                 _current = pose;
                 _currentTime = timestampSeconds;
                 const double elapsed = _currentTime - _previousTime;
+                _lastElapsed = elapsed;
+                _minimumPositiveElapsed = std::min(_minimumPositiveElapsed, elapsed);
+                _maximumPositiveElapsed = std::max(_maximumPositiveElapsed, elapsed);
                 _bodyTwist = RobotLibrary::Math::se3_logarithm(
                     RobotLibrary::Math::se3_inverse(_previous) * _current) / elapsed;
                 _hasVelocity = true;
+                _lastStatus = UpdateStatus::TimestampAdvanced;
                 return;
             }
 
@@ -76,6 +104,16 @@ class CausalParentFrameMotion
             // sequence when TF is published below the controller frequency.
             if(_hasCurrent)
             {
+                if(timestampSeconds == _currentTime)
+                {
+                    ++_duplicateTimestampCount;
+                    _lastStatus = UpdateStatus::DuplicateTimestampIgnored;
+                }
+                else
+                {
+                    ++_outOfOrderTimestampCount;
+                    _lastStatus = UpdateStatus::OutOfOrderTimestampIgnored;
+                }
                 return;
             }
 
@@ -86,6 +124,7 @@ class CausalParentFrameMotion
             _hasVelocity = false;
             _hasCurrent = true;
             _hasPrevious = false;
+            _lastStatus = UpdateStatus::FirstTimestampedSample;
         }
 
         bool has_velocity() const { return _hasVelocity; }
@@ -95,6 +134,19 @@ class CausalParentFrameMotion
         const Eigen::Matrix4d &current_pose() const { return _current; }
 
         double current_time() const { return _currentTime; }
+        double previous_time() const { return _previousTime; }
+        double last_elapsed() const { return _lastElapsed; }
+        double minimum_positive_elapsed() const
+        {
+            return std::isfinite(_minimumPositiveElapsed) ? _minimumPositiveElapsed : 0.0;
+        }
+        double maximum_positive_elapsed() const { return _maximumPositiveElapsed; }
+        UpdateStatus last_update_status() const { return _lastStatus; }
+        std::uint64_t timestamped_setter_count() const { return _timestampedSetterCount; }
+        std::uint64_t static_setter_count() const { return _staticSetterCount; }
+        std::uint64_t duplicate_timestamp_count() const { return _duplicateTimestampCount; }
+        std::uint64_t out_of_order_timestamp_count() const { return _outOfOrderTimestampCount; }
+        bool too_small_interval_observable_without_policy_change() const { return false; }
 
         Eigen::Matrix4d predicted_pose(const int stage, const double dt) const
         {
@@ -129,6 +181,14 @@ class CausalParentFrameMotion
         bool _hasCurrent = false;
         bool _hasPrevious = false;
         bool _hasVelocity = false;
+        UpdateStatus _lastStatus = UpdateStatus::NeverUpdated;
+        std::uint64_t _timestampedSetterCount = 0;
+        std::uint64_t _staticSetterCount = 0;
+        std::uint64_t _duplicateTimestampCount = 0;
+        std::uint64_t _outOfOrderTimestampCount = 0;
+        double _lastElapsed = 0.0;
+        double _minimumPositiveElapsed = std::numeric_limits<double>::infinity();
+        double _maximumPositiveElapsed = 0.0;
 };
 
 /**

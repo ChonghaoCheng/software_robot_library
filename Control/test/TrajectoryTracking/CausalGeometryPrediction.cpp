@@ -14,6 +14,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <thread>
+#include <chrono>
 
 namespace {
 
@@ -122,6 +124,37 @@ void prediction_kinematics()
                   "predicted base angular point twist case " + std::to_string(c));
         }
     }
+
+    // Host pacing is outside the estimator contract: identical pose/timestamp
+    // sequences must produce bitwise-equivalent estimator outputs.
+    CausalParentFrameMotion steady;
+    CausalParentFrameMotion jittered;
+    for(int index = 0; index < 8; ++index)
+    {
+        const double time = 2.0 + sampleDt * index;
+        const Eigen::Matrix4d pose = initial * se3_exponential(
+            sampleDt * index * cases.back());
+        steady.update(pose, time);
+        if(index % 2 == 0)
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        jittered.update(pose, time);
+        check(steady.current_pose().isApprox(jittered.current_pose(), 0.0)
+              && steady.body_twist().isApprox(jittered.body_twist(), 0.0)
+              && steady.current_time() == jittered.current_time(),
+              "parent estimator host-pacing invariance");
+    }
+    const auto timestampedBefore = steady.timestamped_setter_count();
+    const auto duplicateBefore = steady.duplicate_timestamp_count();
+    steady.update(steady.current_pose(), steady.current_time());
+    check(steady.timestamped_setter_count() == timestampedBefore + 1
+          && steady.duplicate_timestamp_count() == duplicateBefore + 1,
+          "duplicate timestamp observability");
+    const auto outOfOrderBefore = steady.out_of_order_timestamp_count();
+    steady.update(steady.current_pose(), steady.current_time() - sampleDt);
+    check(steady.out_of_order_timestamp_count() == outOfOrderBefore + 1,
+          "out-of-order timestamp observability");
+    check(!steady.too_small_interval_observable_without_policy_change(),
+          "too-small interval must remain explicitly not observable without policy change");
 }
 
 void static_parent_controller_equivalence(const std::filesystem::path &urdf)

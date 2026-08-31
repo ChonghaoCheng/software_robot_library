@@ -1711,6 +1711,17 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     _diagnostics.parentFrameBodyTwist = _parentFrameMotion.body_twist();
     _diagnostics.measuredParentPose = _parentFrameMotion.current_pose();
     _diagnostics.parentMeasurementTimeSeconds = _parentFrameMotion.current_time();
+    _diagnostics.parentPreviousMeasurementTimeSeconds = _parentFrameMotion.previous_time();
+    _diagnostics.parentElapsedSeconds = _parentFrameMotion.last_elapsed();
+    _diagnostics.parentUpdateStatus = static_cast<double>(_parentFrameMotion.last_update_status());
+    _diagnostics.parentTimestampedSetterCount = _parentFrameMotion.timestamped_setter_count();
+    _diagnostics.parentStaticSetterCount = _parentFrameMotion.static_setter_count();
+    _diagnostics.parentDuplicateTimestampCount = _parentFrameMotion.duplicate_timestamp_count();
+    _diagnostics.parentOutOfOrderTimestampCount = _parentFrameMotion.out_of_order_timestamp_count();
+    _diagnostics.parentMinimumPositiveElapsed = _parentFrameMotion.minimum_positive_elapsed();
+    _diagnostics.parentMaximumPositiveElapsed = _parentFrameMotion.maximum_positive_elapsed();
+    _diagnostics.parentTooSmallIntervalObservable =
+        _parentFrameMotion.too_small_interval_observable_without_policy_change();
     _diagnostics.predictedParentPoseFirst = parentTransform(1);
     _diagnostics.predictedParentPoseHorizon = parentTransform(N);
     const Eigen::Matrix4d firstPathPose = referenceTransform(_pathProgress);
