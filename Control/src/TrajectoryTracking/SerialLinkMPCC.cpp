@@ -18,12 +18,33 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
 using RobotLibrary::Math::quaternion_to_rotation_vector;
 
 namespace RobotLibrary { namespace Control {
+
+namespace {
+
+SolverOptions<double> diagnostic_box_aware_options(
+    const SolverOptions<double> &productionOptions)
+{
+    SolverOptions<double> options=productionOptions;
+    const char *value=std::getenv("QP_BUDGET_DIAGNOSTIC_MAX_STEPS");
+    if(value==nullptr || value[0]=='\0') return options;
+    const std::string text(value);
+    std::size_t consumed=0;
+    const unsigned long parsed=std::stoul(text,&consumed);
+    if(consumed!=text.size() || parsed!=200UL)
+        throw std::runtime_error(
+            "QP_BUDGET_DIAGNOSTIC_MAX_STEPS must equal preregistered value 200");
+    options.maxSteps=static_cast<unsigned int>(parsed);
+    return options;
+}
+
+} // namespace
 
 SerialLinkMPCC::SerialLinkMPCC(std::shared_ptr<RobotLibrary::Model::KinematicTree> model,
                                const std::string &endpointName,
@@ -599,8 +620,12 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     }
     else
     {
+        // DIAGNOSTIC_ONLY: isolate the study budget from the resolved-rate QP,
+        // which retains the production parameter value.
+        const SolverOptions<double> boxAwareOptions=
+            diagnostic_box_aware_options(_qpOptions);
         const auto specialized = solve_box_aware_active_set(
-            H, f, constraintMatrix, constraintVector, seed, _qpOptions);
+            H, f, constraintMatrix, constraintVector, seed, boxAwareOptions);
         optimum = specialized.solution;
         qpResults = specialized.solver;
     }

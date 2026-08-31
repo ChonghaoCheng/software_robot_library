@@ -39,6 +39,22 @@ namespace RobotLibrary { namespace Control {
 
 namespace {
 
+SolverOptions<double> diagnostic_box_aware_options(
+    const SolverOptions<double> &productionOptions)
+{
+    SolverOptions<double> options=productionOptions;
+    const char *value=std::getenv("QP_BUDGET_DIAGNOSTIC_MAX_STEPS");
+    if(value==nullptr || value[0]=='\0') return options;
+    const std::string text(value);
+    std::size_t consumed=0;
+    const unsigned long parsed=std::stoul(text,&consumed);
+    if(consumed!=text.size() || parsed!=200UL)
+        throw std::runtime_error(
+            "QP_BUDGET_DIAGNOSTIC_MAX_STEPS must equal preregistered value 200");
+    options.maxSteps=static_cast<unsigned int>(parsed);
+    return options;
+}
+
 double clamp_value(const double value, const double lower, const double upper)
 {
     return std::max(lower, std::min(upper, value));
@@ -1520,8 +1536,12 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     }
     else
     {
+        // DIAGNOSTIC_ONLY: isolate the study budget from the resolved-rate QP,
+        // which retains the production parameter value.
+        const SolverOptions<double> boxAwareOptions=
+            diagnostic_box_aware_options(_qpOptions);
         const auto specialized = solve_box_aware_active_set(
-            H, f, Bineq, zineq, zNominal, _qpOptions);
+            H, f, Bineq, zineq, zNominal, boxAwareOptions);
         zOpt = specialized.solution;
         qpResults = specialized.solver;
     }
