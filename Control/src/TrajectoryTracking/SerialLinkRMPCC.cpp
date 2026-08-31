@@ -1555,8 +1555,16 @@ SerialLinkRMPCC::solve_rmpcc(const Eigen::Matrix4d &currentTransformInTrajectory
     // Fixed-progress remains a historical, out-of-scope research path.  The
     // final optimized-progress controller has the strict no-fallback contract.
     if(not _fixedProgressSchedule)
-        RobotLibrary::Math::require_qp_converged(
-            qpResults, "[ERROR] [SERIAL LINK RMPCC] solve_rmpcc()");
+    {
+#ifdef ROBOT_LIBRARY_DIAGNOSTIC_ACCEPT_RMPCC_MAX_ITERATIONS
+        // Diagnostic-only build used to characterize the natural effect of the
+        // configured iteration cap.  The ordinary finite-solution and primal-
+        // feasibility checks below remain mandatory before a command is formed.
+        if(qpResults.terminationReason != SolverTerminationReason::MaxIterations)
+#endif
+            RobotLibrary::Math::require_qp_converged(
+                qpResults, "[ERROR] [SERIAL LINK RMPCC] solve_rmpcc()");
+    }
     if(zOpt.size() != variableDim or not zOpt.allFinite())
     {
         throw std::runtime_error("[ERROR] [SERIAL LINK RMPCC] solve_rmpcc(): QP returned an invalid solution.");
