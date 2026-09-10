@@ -19,7 +19,10 @@ Public headers are organized by controller purpose:
 
 - `Control/Core`: shared serial-link interfaces, parameters, and resolved-rate control.
 - `Control/TrajectoryTracking`: kinematic, MPC, MPCC, and RMPCC trajectory trackers.
-- `Control/Contact`: admittance, impedance, and moving-frame contact controllers.
+
+Contact controllers are maintained in the standalone
+`/home/eric/Workspace/contact_robot_library` repository. Historical Contact
+documentation remains here only for provenance.
 
 Prediction, residual-linearisation, and progress-constraint helpers live under
 `src/TrajectoryTracking/detail`; they are implementation details and are not installed.
@@ -30,7 +33,6 @@ Consumers must use the categorized paths, for example:
 
 ```cpp
 #include <Control/TrajectoryTracking/SerialLinkRMPCC.h>
-#include <Control/Contact/SerialLinkImpedance.h>
 ```
 
 The main public controllers are:
@@ -39,14 +41,11 @@ The main public controllers are:
 - [SerialLinkKinematic](doc/SerialLinkKinematic.md): resolved-rate trajectory tracking.
 - `SerialLinkMPC`, `SerialLinkLieAlgebraMPC`, `SerialLinkMPCC`,
   `SerialLinkCartesianMPCC`, and `SerialLinkRMPCC`: trajectory-tracking controllers.
-- [SerialLinkImpedance](doc/SerialLinkImpedance.md),
-  `AdmittanceContactController`, and `SerialLinkMovingFrameMPC`: contact-oriented controllers.
 
 ```mermaid
   graph TD
 
       SerialLinkBase ---> SerialLinkVelocityBase
-      SerialLinkBase ---> SerialLinkImpedance
       SerialLinkVelocityBase ---> SerialLinkKinematic
       SerialLinkVelocityBase ---> SerialLinkMPC
       SerialLinkVelocityBase ---> SerialLinkMPCC

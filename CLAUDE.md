@@ -5,16 +5,36 @@
 This project records its research in an ARA artifact
 (https://github.com/ARA-Labs/Agent-Native-Research-Artifact).
 
-**This project has two artifact locations. They are not equivalent:**
+**This project uses two canonical research-record repositories, separated by
+experiment domain:**
 
-- `/home/eric/Workspace/MPCC_ARA/` — **canonical**. Its own git repo, carrying the
-  full `evidence/` + `logic/` + `trace/` history. All new records go here.
+- `/home/eric/Workspace/MPCC_ARA/` — canonical for trajectory tracking: classic,
+  MPC, Lie MPC, MPCC, CartesianMPCC, RMPCC, moving-board trajectory tracking,
+  and shared tracking infrastructure.
+- `/home/eric/Workspace/Contact_ARA/` — canonical for contact control:
+  impedance/admittance control, ContactMPCC, contact mechanics, force sensing,
+  contact simulation, and `ws_contact_moving_board` experiments.
+
+The repository-local artifacts are historical snapshots, not writable records:
+
 - `ara/` (inside this repo) — a partial mirror, currently **stale**: it stops at
   claim C07 and is missing the F2-01/F2-02 evidence, and 7 shared files have
   diverged. Treat it as read-only. Do not write research records here, and do not
   reconcile the two without asking.
+- `research/contact_control/ara/` — a historical Contact snapshot. Treat it as
+  read-only; all new Contact records go to `/home/eric/Workspace/Contact_ARA/`.
 
-Wherever a skill below takes `<ara-dir>`, that means `/home/eric/Workspace/MPCC_ARA/`.
+Resolve `<ara-dir>` from the experiment domain. Never duplicate one event into
+both canonical ARAs merely because the two software libraries share copied code.
+If a shared-library change is motivated by one experiment, record it in that
+experiment's ARA; record a cross-domain effect in the other ARA only when that
+domain is actually audited or tested.
+
+Software ownership is also separated by experiment domain:
+
+- `/home/eric/Workspace/software_robot_library` owns tracking controllers.
+- `/home/eric/Workspace/contact_robot_library` owns Contact controllers and
+  temporarily carries a copied dependency snapshot.
 
 Route work to the matching ARA skill — invoke these yourself, without being asked:
 
@@ -39,11 +59,20 @@ Route work to the matching ARA skill — invoke these yourself, without being as
 ## Submission scope
 
 When the researcher says “提交”, “重新提交”, or asks to push the current work,
-inspect and publish all three repositories with native Git:
+inspect and publish only the repositories in the active experiment domain with
+native Git.
+
+Trajectory-tracking scope:
 
 1. `/home/eric/Workspace/software_robot_library`
 2. `/home/eric/Workspace/ws_trajectory_tracking/src`
 3. `/home/eric/Workspace/MPCC_ARA`
+
+Contact-control scope:
+
+1. `/home/eric/Workspace/contact_robot_library`
+2. `/home/eric/Workspace/ws_contact_moving_board/src`
+3. `/home/eric/Workspace/Contact_ARA`
 
 Commit only validated, in-scope changes; do not create empty commits in clean
 repositories. Push each current branch to its configured `origin`. Do not open
@@ -52,9 +81,9 @@ a pull request unless the researcher explicitly asks for one.
 ## Experiment record publication
 
 After an experiment or numerical audit finishes and its results have been
-validated, commit and push its canonical `/home/eric/Workspace/MPCC_ARA`
-record automatically as part of the same task. Include the machine-readable
-evidence and session trace. Do not wait for a separate submission request.
+validated, commit and push its domain-specific canonical ARA automatically as
+part of the same task. Include the machine-readable evidence and session trace.
+Do not wait for a separate submission request.
 
 Do not publish a failed or still-unverified result as complete, and do not
 bundle unrelated dirty-worktree changes. If the target branch, remote, or

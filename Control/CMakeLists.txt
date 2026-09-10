@@ -9,11 +9,6 @@ add_library(Control src/Core/SerialLinkBase.cpp
                     src/TrajectoryTracking/SerialLinkMPC.cpp
                     src/TrajectoryTracking/SerialLinkLieAlgebraMPC.cpp
                     src/TrajectoryTracking/SerialLinkRMPCC.cpp
-                    src/Contact/AdmittanceContactController.cpp
-                    src/Contact/ContactControllerBase.cpp
-                    src/Contact/SerialLinkGeometricImpedance.cpp
-                    src/Contact/SerialLinkImpedance.cpp
-                    src/Contact/SerialLinkMovingFrameMPC.cpp
 )
 
 # Specify targets to be built
