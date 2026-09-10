@@ -41,6 +41,19 @@ mpcc_express_body_tangent_in_prediction_frame(
     return result;
 }
 
+inline Eigen::Matrix<double,6,6>
+mpcc_prediction_twist_to_body_map(
+    const Eigen::Matrix3d &stageRotation,
+    const Eigen::Matrix3d &predictionRotation)
+{
+    const Eigen::Matrix3d rotation =
+        stageRotation.transpose() * predictionRotation;
+    Eigen::Matrix<double,6,6> result = Eigen::Matrix<double,6,6>::Zero();
+    result.block<3,3>(0,0) = rotation;
+    result.block<3,3>(3,3) = rotation;
+    return result;
+}
+
 inline Eigen::Matrix3d
 mpcc_stage_reference_rotation(
     const Eigen::Matrix4d &predictedParentTransform,

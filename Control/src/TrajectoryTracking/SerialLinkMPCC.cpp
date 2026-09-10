@@ -274,6 +274,7 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         static_cast<size_t>(N), Eigen::Vector<double,ERROR_DIM>::Zero());
     std::vector<Eigen::Vector<double,ERROR_DIM>> referenceMotions(
         static_cast<size_t>(N));
+    std::vector<Eigen::Matrix3d> stageRotations(static_cast<size_t>(N));
     const bool parentMotionActive = _parentFrameMotion.prediction_velocity_active()
         && _parentFrameMotion.body_twist().squaredNorm() > 0.0;
     const auto parentTransform = [&](const int stage)
@@ -283,6 +284,13 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
     double progress = _pathProgress;
     for(int stage = 0; stage < N; ++stage)
     {
+        const Eigen::Matrix4d pathPose =
+            _trajectory.pose_at_progress(progress).as_matrix();
+        stageRotations[static_cast<size_t>(stage)] =
+            mpcc_stage_reference_rotation(
+                parentMotionActive ? parentTransform(stage)
+                                   : _trajectoryFrame.transformInBase,
+                pathPose);
         pathTangents[static_cast<size_t>(stage)] =
             path_tangent_at_progress(progress, referenceRotation);
 
@@ -297,13 +305,10 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             pathTangents[static_cast<size_t>(stage)] * rate;
         if(parentMotionActive)
         {
-            RobotLibrary::Model::Pose pathPoseModel =
-                _trajectory.pose_at_progress(progress);
-            const Eigen::Matrix4d pathPose = pathPoseModel.as_matrix();
             const Eigen::Vector<double,6> bodyTangent =
                 _trajectory.tangent_at_progress(progress);
-            const Eigen::Matrix3d stageRotation =
-                mpcc_stage_reference_rotation(parentTransform(stage), pathPose);
+            const Eigen::Matrix3d &stageRotation =
+                stageRotations[static_cast<size_t>(stage)];
             const auto mappedMotion = [&](const double candidateRate)
             {
                 const Eigen::Matrix4d displacement =
@@ -541,19 +546,34 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
             ? fixedProgressRates(stage) : _vProgressMax;
     }
 
-    const RobotLibrary::Math::BoxConstraint box =
-        RobotLibrary::Math::box_constraint(lower, upper);
-    MatrixXd constraintMatrix =
-        MatrixXd::Zero(box.constraintMatrix.rows() + 1, controlDim);
-    VectorXd constraintVector =
-        VectorXd::Zero(box.constraintVector.size() + 1);
-    constraintMatrix.topRows(box.constraintMatrix.rows()) = box.constraintMatrix;
-    constraintVector.head(box.constraintVector.size()) = box.constraintVector;
+    // The MPCC controls share the prediction-reference coordinates, whereas the
+    // physical component limits are defined in each horizon stage's body frame.
+    // Keep the same component-wise box, but rotate its six twist rows per stage.
+    constexpr int twistConstraintRows = 12;
+    constexpr int progressConstraintRows = 2;
+    const int rowsPerStage = twistConstraintRows + progressConstraintRows;
+    MatrixXd constraintMatrix = MatrixXd::Zero(rowsPerStage * N + 1, controlDim);
+    VectorXd constraintVector = VectorXd::Zero(rowsPerStage * N + 1);
     for(int stage = 0; stage < N; ++stage)
     {
-        constraintMatrix(box.constraintMatrix.rows(), stage * NU + 6) = _dt;
+        const int column = stage * NU;
+        const int row = stage * rowsPerStage;
+        const Eigen::Matrix<double,6,6> predictionToBody =
+            mpcc_prediction_twist_to_body_map(
+                stageRotations[static_cast<size_t>(stage)], referenceRotation);
+        constraintMatrix.block<6,6>(row, column) = predictionToBody;
+        constraintMatrix.block<6,6>(row + 6, column) = -predictionToBody;
+        constraintVector.segment<3>(row).setConstant(_vMaxLinear);
+        constraintVector.segment<3>(row + 3).setConstant(_vMaxAngular);
+        constraintVector.segment<3>(row + 6).setConstant(_vMaxLinear);
+        constraintVector.segment<3>(row + 9).setConstant(_vMaxAngular);
+        constraintMatrix(row + 12, column + 6) = 1.0;
+        constraintVector(row + 12) = upper(column + 6);
+        constraintMatrix(row + 13, column + 6) = -1.0;
+        constraintVector(row + 13) = -lower(column + 6);
+        constraintMatrix(rowsPerStage * N, column + 6) = _dt;
     }
-    constraintVector.tail<1>()(0) = remaining;
+    constraintVector(rowsPerStage * N) = remaining;
 
     auto make_feasible = [&](VectorXd seed)
     {
@@ -561,9 +581,24 @@ SerialLinkMPCC::solve_mpcc(const Eigen::Vector<double,ERROR_DIM> &error0,
         {
             seed = nominalControl;
         }
-        for(int i = 0; i < controlDim; ++i)
+        for(int stage = 0; stage < N; ++stage)
         {
-            seed(i) = std::clamp(seed(i), lower(i), upper(i));
+            const int offset = stage * NU;
+            const Eigen::Matrix<double,6,6> predictionToBody =
+                mpcc_prediction_twist_to_body_map(
+                    stageRotations[static_cast<size_t>(stage)], referenceRotation);
+            Eigen::Vector<double,6> bodyTwist =
+                predictionToBody * seed.segment<6>(offset);
+            for(int axis = 0; axis < 3; ++axis)
+            {
+                bodyTwist(axis) = std::clamp(
+                    bodyTwist(axis), -_vMaxLinear, _vMaxLinear);
+                bodyTwist(axis + 3) = std::clamp(
+                    bodyTwist(axis + 3), -_vMaxAngular, _vMaxAngular);
+            }
+            seed.segment<6>(offset) = predictionToBody.transpose() * bodyTwist;
+            seed(offset + 6) = std::clamp(
+                seed(offset + 6), lower(offset + 6), upper(offset + 6));
         }
 
         double predictedAdvance = 0.0;
